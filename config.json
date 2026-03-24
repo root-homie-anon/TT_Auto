@@ -1,0 +1,32 @@
+{
+  "project": {
+    "name": "Health is Wealth",
+    "slug": "health-is-wealth",
+    "version": "1.0.0"
+  },
+  "channel": {
+    "niche": "health",
+    "tiktok_handle": "",
+    "pilot_program_active": true,
+    "max_videos_per_week": 5,
+    "min_shop_performance_score": 95
+  },
+  "pipeline": {
+    "products_per_run": 5,
+    "video_formats": ["voiceover", "hook-text", "demo"],
+    "auto_select_format": true
+  },
+  "sources": {
+    "tiktok_creative_center": true,
+    "fastmoss": true,
+    "fastmoss_daily_limit": 10
+  },
+  "credentials": {
+    "env_file": ".env"
+  },
+  "features": {
+    "auto_post": false,
+    "multi_channel": false,
+    "analyst_feedback_loop": true
+  }
+}
