@@ -1,5 +1,6 @@
 import type { ScoreBreakdown } from '../shared/types.js';
-import type { SCSearchProduct, SCProductDetailResponse, SCShopPerformance } from '../shared/scrape-creators-client.js';
+import type { SCSearchProduct, SCProductDetailResponse } from '../shared/scrape-creators-client.js';
+import { getSoldCount, parseCount } from '../shared/scrape-creators-client.js';
 import { loadConfig } from '../shared/config.js';
 
 interface ScoringInput {
@@ -8,20 +9,38 @@ interface ScoringInput {
 }
 
 /**
- * Extract the overall shop performance percentile (0-100) from the
- * shop_performance array. The array contains entries typed by metric
- * (e.g. "product_quality", "logistics", "service"). We average all
- * percentiles to get one composite score.
+ * Score shop quality using product rating as proxy (0-100).
+ * Shop performance scores aren't available from ScrapeCreators,
+ * so we use product rating (0-5) scaled to 0-100.
  */
-function getShopPerformanceScore(perf: SCShopPerformance[]): number {
-  if (perf.length === 0) return 0;
-  const total = perf.reduce((sum, p) => sum + p.score_percentile, 0);
-  return Math.round(total / perf.length);
+function scoreShopPerformance(
+  searchProduct: SCSearchProduct,
+  details: SCProductDetailResponse | null,
+): number {
+  // Prefer detail review rating, fall back to search rating
+  const rating = details?.product_detail_review?.product_rating
+    ?? searchProduct.rate_info?.score
+    ?? 0;
+
+  const reviewCount = details?.product_detail_review?.review_count
+    ?? searchProduct.rate_info?.review_count
+    ?? 0;
+
+  if (rating === 0 || reviewCount === 0) return 0;
+
+  // Scale 0-5 rating to 0-100, with review count as confidence
+  let score = (rating / 5) * 100;
+
+  // Penalize low review counts (less confidence)
+  if (reviewCount < 10) score *= 0.6;
+  else if (reviewCount < 50) score *= 0.8;
+  else if (reviewCount < 100) score *= 0.9;
+
+  return Math.round(score);
 }
 
 /**
  * Estimate sales velocity as a 0-100 score based on sold_count.
- * These thresholds are tuned for TikTok Shop health products.
  */
 function scoreSalesVelocity(soldCount: number): number {
   if (soldCount >= 50000) return 100;
@@ -32,23 +51,22 @@ function scoreSalesVelocity(soldCount: number): number {
   if (soldCount >= 1000) return 50;
   if (soldCount >= 500) return 40;
   if (soldCount >= 100) return 25;
-  return 10;
+  if (soldCount >= 10) return 15;
+  return 5;
 }
 
 /**
  * Score video engagement from related promo videos (0-100).
  */
 function scoreVideoEngagement(details: SCProductDetailResponse | null): number {
-  if (!details || details.related_videos.length === 0) return 0;
+  if (!details || !details.related_videos || details.related_videos.length === 0) return 0;
 
   const videos = details.related_videos;
-  const avgPlays = videos.reduce((sum, v) => sum + v.play_count, 0) / videos.length;
-  const avgLikes = videos.reduce((sum, v) => sum + v.like_count, 0) / videos.length;
+  const avgPlays = videos.reduce((sum, v) => sum + parseCount(v.play_count), 0) / videos.length;
+  const avgLikes = videos.reduce((sum, v) => sum + parseCount(v.like_count), 0) / videos.length;
 
-  // Engagement = likes/plays ratio, scaled
   const engagementRate = avgPlays > 0 ? avgLikes / avgPlays : 0;
 
-  // High play counts are also a signal
   let playScore: number;
   if (avgPlays >= 1000000) playScore = 100;
   else if (avgPlays >= 500000) playScore = 85;
@@ -58,7 +76,6 @@ function scoreVideoEngagement(details: SCProductDetailResponse | null): number {
   else if (avgPlays >= 1000) playScore = 25;
   else playScore = 10;
 
-  // Engagement rate score
   let engScore: number;
   if (engagementRate >= 0.10) engScore = 100;
   else if (engagementRate >= 0.05) engScore = 75;
@@ -73,11 +90,11 @@ function scoreVideoEngagement(details: SCProductDetailResponse | null): number {
  * Score asset availability based on image count and video presence (0-100).
  */
 function scoreAssetAvailability(details: SCProductDetailResponse | null): number {
-  if (!details) return 30; // Can still proceed with search-level image
+  if (!details) return 30;
 
-  const imageCount = details.product_info.product_base.images.length;
-  const hasVideo = !!details.product_info.product_base.desc_video;
-  const hasRelatedVideos = details.related_videos.length > 0;
+  const imageCount = details.product_base?.images?.length ?? 0;
+  const hasVideo = !!details.product_base?.desc_video?.video_infos?.length;
+  const hasRelatedVideos = (details.related_videos?.length ?? 0) > 0;
 
   let score = 0;
   if (imageCount >= 5) score += 50;
@@ -94,25 +111,22 @@ export function scoreProduct(input: ScoringInput): { score: number; breakdown: S
   const config = loadConfig();
   const weights = config.scoring.weights;
 
-  const salesVelocity = scoreSalesVelocity(input.searchProduct.sold_info.sold_count);
-
-  const shopPerf = input.details
-    ? getShopPerformanceScore(input.details.shop_performance)
-    : 0;
-
+  const soldCount = getSoldCount(input.searchProduct);
+  const salesVelocity = scoreSalesVelocity(soldCount);
+  const shopPerformance = scoreShopPerformance(input.searchProduct, input.details);
   const videoEngagement = scoreVideoEngagement(input.details);
   const assetAvailability = scoreAssetAvailability(input.details);
 
   const breakdown: ScoreBreakdown = {
     salesVelocity,
-    shopPerformance: shopPerf,
+    shopPerformance,
     videoEngagement,
     assetAvailability,
   };
 
   const score = Math.round(
     salesVelocity * weights.salesVelocity +
-    shopPerf * weights.shopPerformance +
+    shopPerformance * weights.shopPerformance +
     videoEngagement * weights.videoEngagement +
     assetAvailability * weights.assetAvailability,
   );
@@ -126,9 +140,10 @@ export function meetsMinimumCriteria(
 ): boolean {
   const config = loadConfig();
   const minScore = config.scoring.minScoreToQueue;
-  const minShopPerf = config.channel.pilotProgramActive
-    ? config.channel.minShopPerformanceScore
-    : 0;
+
+  // During pilot, require minimum shop quality (rating-based proxy)
+  // Lowered from 95 to 80 since we're using rating proxy, not actual SPS
+  const minShopPerf = config.channel.pilotProgramActive ? 80 : 0;
 
   return score >= minScore && shopPerformanceScore >= minShopPerf;
 }

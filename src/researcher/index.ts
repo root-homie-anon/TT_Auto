@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { ScrapeCreatorsClient } from '../shared/scrape-creators-client.js';
+import { ScrapeCreatorsClient, getSoldCount, getRating, getReviewCount, getImageUrl } from '../shared/scrape-creators-client.js';
 import { loadConfig } from '../shared/config.js';
 import {
   readProductQueue,
@@ -23,7 +23,7 @@ function isRecentlyProcessed(productId: string, queue: QueuedProduct[], postedId
 }
 
 function buildProductUrl(productId: string): string {
-  return `https://www.tiktok.com/view/product/${productId}`;
+  return `https://www.tiktok.com/shop/pdp/${productId}`;
 }
 
 /**
@@ -34,7 +34,6 @@ function selectKeywordsForRun(): string[] {
   const signals = readAnalystSignals();
   const allCategories = Object.keys(HEALTH_SEARCH_KEYWORDS);
 
-  // Prioritize high-performing categories if analyst data exists
   let prioritizedCategories: string[];
   if (signals && signals.highPerformingCategories.length > 0) {
     const highPerf = signals.highPerformingCategories as string[];
@@ -45,12 +44,10 @@ function selectKeywordsForRun(): string[] {
     prioritizedCategories = allCategories;
   }
 
-  // Pick 2 keywords from each prioritized category (max 10 searches per run)
   const selected: string[] = [];
   for (const category of prioritizedCategories) {
     const keywords = HEALTH_SEARCH_KEYWORDS[category];
     if (!keywords) continue;
-    // Randomly pick 2 from each category
     const shuffled = [...keywords].sort(() => Math.random() - 0.5);
     selected.push(...shuffled.slice(0, 2));
     if (selected.length >= 10) break;
@@ -65,7 +62,6 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
   const existingQueue = readProductQueue();
   const posted = readPosted();
 
-  // Build dedup set from recent posts
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - DEDUP_WINDOW_DAYS);
   const recentPostedIds = new Set(
@@ -88,18 +84,18 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
       console.log(`[researcher] Searching: "${keyword}"`);
       const results = await client.searchProducts(keyword);
 
-      if (!results.success || results.products.length === 0) {
+      if (!results.success || !results.products || results.products.length === 0) {
         console.log(`[researcher] No results for "${keyword}"`);
         continue;
       }
 
       // Take top products by sold count from each search
       const sorted = [...results.products].sort(
-        (a, b) => b.sold_info.sold_count - a.sold_info.sold_count,
+        (a, b) => getSoldCount(b) - getSoldCount(a),
       );
 
       for (const product of sorted.slice(0, 5)) {
-        if (!isRecentlyProcessed(product.product_id, existingQueue, recentPostedIds)) {
+        if (getSoldCount(product) > 0 && !isRecentlyProcessed(product.product_id, existingQueue, recentPostedIds)) {
           candidates.push({ searchProduct: product, keyword });
         }
       }
@@ -114,7 +110,7 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
     }
   }
 
-  console.log(`[researcher] Found ${candidates.length} unique candidates`);
+  console.log(`[researcher] Found ${candidates.length} candidates`);
 
   // Deduplicate by product_id
   const seen = new Set<string>();
@@ -124,13 +120,13 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
     return true;
   });
 
-  // Phase 2: Get detailed info for top candidates (by sold count)
-  // Sort by sold count to prioritize API calls on most promising products
+  console.log(`[researcher] ${uniqueCandidates.length} unique candidates after dedup`);
+
+  // Phase 2: Sort by sold count, fetch details for top candidates
   uniqueCandidates.sort(
-    (a, b) => b.searchProduct.sold_info.sold_count - a.searchProduct.sold_info.sold_count,
+    (a, b) => getSoldCount(b.searchProduct) - getSoldCount(a.searchProduct),
   );
 
-  // Limit detail fetches to save API credits
   const detailLimit = Math.min(uniqueCandidates.length, config.pipeline.productsPerRun * 3);
   const scoredProducts: Array<{
     product: QueuedProduct;
@@ -156,12 +152,8 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
         details,
       });
 
-      const shopPerf = details.shop_performance.length > 0
-        ? Math.round(
-            details.shop_performance.reduce((s, p) => s + p.score_percentile, 0) /
-            details.shop_performance.length,
-          )
-        : 0;
+      // Use the shopPerformance breakdown score (rating-based proxy)
+      const shopPerf = breakdown.shopPerformance;
 
       const category = getCategoryForKeyword(candidate.keyword) as ProductCategory;
       const accepted = meetsMinimumCriteria(shopPerf, score);
@@ -175,7 +167,7 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
         rejectReason: !accepted
           ? score < config.scoring.minScoreToQueue
             ? `Score ${score} below minimum ${config.scoring.minScoreToQueue}`
-            : `Shop performance ${shopPerf} below minimum ${config.channel.minShopPerformanceScore}`
+            : `Shop quality ${shopPerf} below minimum 80`
           : undefined,
         researchedAt: new Date().toISOString(),
       };
@@ -183,30 +175,31 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
       researchLog.push(logEntry);
 
       if (accepted) {
+        const soldCount = getSoldCount(candidate.searchProduct);
         const product: QueuedProduct = {
           id: uuidv4(),
           productName: candidate.searchProduct.title,
           productUrl: productUrl,
           tiktokShopId: candidate.searchProduct.product_id,
           category,
-          commissionRate: null, // Not available from ScrapeCreators
+          commissionRate: null,
           shopPerformanceScore: shopPerf,
           score,
           scoreBreakdown: breakdown,
           researchedAt: new Date().toISOString(),
           status: 'queued',
-          soldCount: candidate.searchProduct.sold_info.sold_count,
-          price: candidate.searchProduct.product_price_info.sale_price_format,
-          rating: candidate.searchProduct.rate_info.score,
-          reviewCount: candidate.searchProduct.rate_info.review_count,
+          soldCount,
+          price: `$${candidate.searchProduct.product_price_info.sale_price_format}`,
+          rating: getRating(candidate.searchProduct),
+          reviewCount: getReviewCount(candidate.searchProduct),
           sellerName: candidate.searchProduct.seller_info.shop_name,
-          imageUrl: candidate.searchProduct.image.url_list[0] ?? '',
+          imageUrl: getImageUrl(candidate.searchProduct),
         };
 
         scoredProducts.push({ product, logEntry });
-        console.log(`[researcher] ✓ Accepted: ${product.productName.slice(0, 50)} (score: ${score})`);
+        console.log(`[researcher] Accepted: ${product.productName.slice(0, 50)} (score: ${score})`);
       } else {
-        console.log(`[researcher] ✗ Rejected: ${candidate.searchProduct.title.slice(0, 50)} (${logEntry.rejectReason})`);
+        console.log(`[researcher] Rejected: ${candidate.searchProduct.title.slice(0, 50)} (${logEntry.rejectReason})`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

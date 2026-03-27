@@ -1,5 +1,7 @@
 import { loadConfig } from './config.js';
 
+// --- Search endpoint types (match actual API response) ---
+
 export interface SCSearchProduct {
   product_id: string;
   title: string;
@@ -8,7 +10,7 @@ export interface SCSearchProduct {
     width: number;
     uri: string;
     url_list: string[];
-  };
+  } | null;
   product_price_info: {
     sale_price_format: string;
     sale_price_decimal: string;
@@ -20,16 +22,16 @@ export interface SCSearchProduct {
   rate_info: {
     score: number;
     review_count: number;
-  };
+  } | null;
   sold_info: {
     sold_count: number;
-  };
+  } | null;
   seller_info: {
     seller_id: string;
     shop_name: string;
     shop_logo: {
       url_list: string[];
-    };
+    } | null;
   };
   seo_url: {
     canonical_url: string;
@@ -43,97 +45,126 @@ export interface SCSearchResponse {
   products: SCSearchProduct[];
 }
 
-export interface SCShopPerformance {
-  score_percentile: number;
-  type: string;
-}
-
-export interface SCStoreSubScore {
-  score: number;
-  type: string;
-  score_percentage: number;
-}
+// --- Product detail types (flat structure, matches actual API) ---
 
 export interface SCProductImage {
   height: number;
   width: number;
-  uri: string;
-  url_list: string[];
+  thumb_url_list?: string[];
+  url_list?: string[];
+  uri?: string;
 }
 
 export interface SCReviewItem {
-  review_rating: number;
-  review_text: string;
-  reviewer_name: string;
-  is_verified_purchase: boolean;
+  review: {
+    review_id: string;
+    rating: number;
+    display_text: string;
+    images?: SCProductImage[];
+  };
+  user?: {
+    nick_name: string;
+  };
 }
 
 export interface SCRelatedVideo {
   item_id: string;
-  play_count: number;
-  like_count: number;
+  play_count: string | number;
+  like_count: string | number;
   duration: number;
   title: string;
   cover_image_url: string;
-  content_url: string;
-  url: string;
+  content_url?: string;
+  author_id: string;
 }
 
 export interface SCProductDetailResponse {
   success: boolean;
-  categories: string[];
-  product_info: {
-    product_id: string;
+  credits_remaining?: number;
+  product_id: string;
+  seller_id: string;
+  seller: {
     seller_id: string;
-    seller: {
-      name: string;
-      seller_id: string;
-    };
-    product_base: {
-      title: string;
-      sold_count: number;
-      desc_video?: {
-        video_infos: Array<{ url: string }>;
-      };
-      images: SCProductImage[];
-      price: {
-        original_price: string;
-        real_price: string;
-        discount: string;
-        currency: string;
-        currency_symbol: string;
-      };
-    };
-    product_detail_review?: {
-      product_rating: number;
-      review_count: number;
-      review_items: SCReviewItem[];
+    name: string;
+    avatar?: SCProductImage;
+  };
+  product_base: {
+    title: string;
+    images: SCProductImage[];
+    desc_video?: {
+      video_infos?: Array<{ main_url?: string; url_list?: string[] }>;
     };
   };
-  shop_info: {
-    seller_id: string;
-    sold_count: number;
-    shop_name: string;
-    shop_rating: number;
-    shop_link: string;
-    store_sub_score: SCStoreSubScore[];
+  skus?: Array<{
+    sku_id: string;
+    stock: number;
+    price: {
+      original_price: string;
+      real_price: string;
+      currency: string;
+      currency_symbol: string;
+    };
+  }>;
+  product_detail_review?: {
+    product_rating: number;
     review_count: number;
-    followers_count: number;
+    review_items: SCReviewItem[];
   };
-  shop_performance: SCShopPerformance[];
   related_videos: SCRelatedVideo[];
 }
 
 export interface SCProductReviewsResponse {
   success: boolean;
+  credits_remaining?: number;
   has_more: boolean;
   total_reviews: string;
-  product_reviews: SCReviewItem[];
+  product_reviews: Array<{
+    review_id: string;
+    review_rating: number;
+    review_text: string;
+    reviewer_name: string;
+    is_verified_purchase: boolean;
+  }>;
   review_ratings: {
     review_count: number;
     overall_score: number;
   };
 }
+
+// --- Helpers ---
+
+/** Safely extract sold_count, defaulting to 0 if null */
+export function getSoldCount(product: SCSearchProduct): number {
+  return product.sold_info?.sold_count ?? 0;
+}
+
+/** Safely extract rating score, defaulting to 0 if null */
+export function getRating(product: SCSearchProduct): number {
+  return product.rate_info?.score ?? 0;
+}
+
+/** Safely extract review count, defaulting to 0 if null */
+export function getReviewCount(product: SCSearchProduct): number {
+  return product.rate_info?.review_count ?? 0;
+}
+
+/** Get first image URL from a search product */
+export function getImageUrl(product: SCSearchProduct): string {
+  return product.image?.url_list?.[0] ?? '';
+}
+
+/** Get first image URL from a detail product image */
+export function getDetailImageUrl(image: SCProductImage): string {
+  return image.thumb_url_list?.[0] ?? image.url_list?.[0] ?? '';
+}
+
+/** Parse play/like counts which can be strings or numbers */
+export function parseCount(value: string | number): number {
+  if (typeof value === 'number') return value;
+  return parseInt(value, 10) || 0;
+}
+
+// --- Client ---
 
 export class ScrapeCreatorsError extends Error {
   constructor(
