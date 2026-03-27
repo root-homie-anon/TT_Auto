@@ -6,27 +6,50 @@
   },
   "channel": {
     "niche": "health",
-    "tiktok_handle": "",
-    "pilot_program_active": true,
-    "max_videos_per_week": 5,
-    "min_shop_performance_score": 95
+    "tiktokHandle": "",
+    "pilotProgramActive": true,
+    "maxVideosPerWeek": 5,
+    "minShopPerformanceScore": 95
   },
   "pipeline": {
-    "products_per_run": 5,
-    "video_formats": ["voiceover", "hook-text", "demo"],
-    "auto_select_format": true
+    "productsPerRun": 5,
+    "videoFormats": ["voiceover", "hook-text", "demo"],
+    "autoSelectFormat": true
   },
   "sources": {
-    "tiktok_creative_center": true,
-    "fastmoss": true,
-    "fastmoss_daily_limit": 10
+    "scrapeCreators": {
+      "enabled": true,
+      "baseUrl": "https://api.scrapecreators.com",
+      "searchRegion": "US"
+    }
   },
-  "credentials": {
-    "env_file": ".env"
+  "scoring": {
+    "minScoreToQueue": 65,
+    "weights": {
+      "salesVelocity": 0.35,
+      "shopPerformance": 0.30,
+      "videoEngagement": 0.20,
+      "assetAvailability": 0.15
+    }
+  },
+  "tts": {
+    "provider": "edge-tts",
+    "voiceId": "en-US-GuyNeural"
+  },
+  "video": {
+    "primaryGenerator": "kling",
+    "fallbackGenerator": "ffmpeg-slideshow",
+    "targetAspectRatio": "9:16",
+    "targetResolution": "1080x1920"
+  },
+  "posting": {
+    "optimalTimes": ["07:00", "12:00", "19:00"],
+    "timezone": "America/New_York",
+    "minHoursBetweenPosts": 24
   },
   "features": {
-    "auto_post": false,
-    "multi_channel": false,
-    "analyst_feedback_loop": true
+    "autoPost": false,
+    "multiChannel": false,
+    "analystFeedbackLoop": true
   }
 }

@@ -1,0 +1,25 @@
+{
+  "name": "health-is-wealth",
+  "version": "1.0.0",
+  "description": "Automated TikTok Shop affiliate content pipeline",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "pipeline": "tsx scripts/run-pipeline.ts",
+    "research": "tsx scripts/run-researcher.ts",
+    "video": "tsx scripts/run-video.ts",
+    "queue": "tsx scripts/check-queue.ts",
+    "dashboard": "cd dashboard && npm run dev",
+    "dashboard:build": "cd dashboard && npm run build"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
