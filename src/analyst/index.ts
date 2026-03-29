@@ -21,12 +21,11 @@ interface VideoMetrics {
 
 function calculateMetrics(perf: VideoPerformance): VideoMetrics {
   const views = perf.views || 1; // avoid division by zero
-  const clicks = perf.clicks || 1;
 
   return {
     engagementRate: (perf.likes + perf.comments + perf.shares) / views,
     clickThroughRate: perf.clicks / views,
-    conversionRate: perf.conversions / clicks,
+    conversionRate: perf.clicks > 0 ? perf.conversions / perf.clicks : 0,
     revenuePerView: perf.commissionEarned / views,
   };
 }

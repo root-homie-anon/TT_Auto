@@ -81,16 +81,15 @@ export function buildTextOverlayFilter(
     prevLabel = label;
   }
 
-  // Rename final label to [textout]
-  if (prevLabel !== 'textout') {
-    filters[filters.length - 1] = filters[filters.length - 1]!.replace(
-      `[${prevLabel}]`,
-      '[textout]',
-    );
-    // Fix: if prevLabel was the last label used, the output should be [textout]
-    if (!filters[filters.length - 1]!.endsWith('[textout]')) {
-      filters.push(`[${prevLabel}]copy[textout]`);
-    }
+  // Rename the output label of the last filter to [textout]
+  // The output label is always the last [...] in the filter string
+  const lastFilter = filters[filters.length - 1]!;
+  const outputLabelRegex = /\[[^\]]+\]$/;
+  if (outputLabelRegex.test(lastFilter)) {
+    filters[filters.length - 1] = lastFilter.replace(outputLabelRegex, '[textout]');
+  } else {
+    // Shouldn't happen, but safe fallback
+    filters.push(`[${prevLabel}]copy[textout]`);
   }
 
   return filters.join(';');

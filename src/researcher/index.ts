@@ -189,7 +189,7 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
           researchedAt: new Date().toISOString(),
           status: 'queued',
           soldCount,
-          price: `$${candidate.searchProduct.product_price_info.sale_price_format}`,
+          price: `${candidate.searchProduct.product_price_info.currency_symbol}${candidate.searchProduct.product_price_info.sale_price_decimal}`,
           rating: getRating(candidate.searchProduct),
           reviewCount: getReviewCount(candidate.searchProduct),
           sellerName: candidate.searchProduct.seller_info.shop_name,
