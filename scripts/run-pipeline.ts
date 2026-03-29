@@ -1,9 +1,13 @@
 import 'dotenv/config';
 import { runResearcher } from '../src/researcher/index.js';
 import { collectAllAssets } from '../src/asset-collector/index.js';
-import { getDailyBriefing } from '../src/content-manager/index.js';
+import { writeAllScripts } from '../src/scriptwriter/index.js';
+import { produceAllVideos } from '../src/video-producer/index.js';
+import { buildPostingPackage, getDailyBriefing } from '../src/content-manager/index.js';
 import { generateSignals } from '../src/analyst/index.js';
-import { writeLastRun } from '../src/shared/state.js';
+import { readProductQueue, writeLastRun } from '../src/shared/state.js';
+import { resolve } from 'path';
+import { getProjectRoot } from '../src/shared/config.js';
 
 async function main(): Promise<void> {
   console.log('\n=== Health is Wealth — Full Pipeline ===\n');
@@ -11,6 +15,7 @@ async function main(): Promise<void> {
   const startTime = Date.now();
   const errors: string[] = [];
   let productsFound = 0;
+  let videosProduced = 0;
 
   try {
     // Step 1: Research
@@ -27,14 +32,34 @@ async function main(): Promise<void> {
     console.log('\n--- Step 2: Asset Collection ---');
     await collectAllAssets();
 
-    // Step 3: Scriptwriter + Video Producer
-    // These are handled externally (user has VO, scriptwriter, video gen ready)
-    console.log('\n--- Step 3: Script & Video ---');
-    console.log('Scriptwriter and video production handled externally.');
-    console.log('Run scripts/run-video.ts per product when ready.');
+    // Step 3: Generate scripts
+    console.log('\n--- Step 3: Script Generation ---');
+    await writeAllScripts();
 
-    // Step 4: Update analyst signals
-    console.log('\n--- Step 4: Analyst Signals ---');
+    // Step 4: Produce videos
+    console.log('\n--- Step 4: Video Production ---');
+    videosProduced = await produceAllVideos();
+
+    // Step 5: Package for posting
+    console.log('\n--- Step 5: Content Packaging ---');
+    const queue = readProductQueue();
+    const videoReady = queue.filter((p) => p.status === 'video_ready');
+    const today = new Date().toISOString().split('T')[0]!;
+    let packaged = 0;
+    for (const product of videoReady) {
+      const videoPath = resolve(getProjectRoot(), 'output', today, `${product.tiktokShopId}-final.mp4`);
+      const result = buildPostingPackage(product, videoPath);
+      if (result) {
+        packaged++;
+      } else {
+        console.log(`[pipeline] Packaging skipped for ${product.productName.slice(0, 50)} (limit reached or video missing)`);
+        break; // If limit reached, no point trying more
+      }
+    }
+    console.log(`[pipeline] Packaged ${packaged}/${videoReady.length} videos`);
+
+    // Step 6: Update analyst signals
+    console.log('\n--- Step 6: Analyst Signals ---');
     generateSignals();
 
     // Briefing
@@ -51,7 +76,7 @@ async function main(): Promise<void> {
     writeLastRun({
       timestamp: new Date().toISOString(),
       productsFound,
-      videosProduced: 0,
+      videosProduced,
       errors,
     });
   }

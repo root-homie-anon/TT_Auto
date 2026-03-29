@@ -40,7 +40,8 @@
     "primaryGenerator": "kling",
     "fallbackGenerator": "ffmpeg-slideshow",
     "targetAspectRatio": "9:16",
-    "targetResolution": "1080x1920"
+    "targetResolution": "1080x1920",
+    "fontPath": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
   },
   "posting": {
     "optimalTimes": ["07:00", "12:00", "19:00"],

@@ -11,9 +11,48 @@ export type ProductStatus =
   | 'assets_ready'
   | 'assets_failed'
   | 'script_ready'
+  | 'script_failed'
   | 'video_ready'
+  | 'video_failed'
   | 'post_ready'
   | 'posted';
+
+export type VideoFormat =
+  | 'voiceover'
+  | 'demo'
+  | 'hook-text'
+  | 'voiceover-before-after';
+
+export interface TextOverlay {
+  text: string;
+  startSecond: number;
+  endSecond: number;
+}
+
+export interface ProductScript {
+  productId: string;
+  format: VideoFormat;
+  durationTargetSeconds: number;
+  hook: {
+    text: string;
+    displaySeconds: number;
+  };
+  voiceover: string;
+  overlays: TextOverlay[];
+  caption: string;
+  hashtags: string[];
+  writtenAt: string;
+}
+
+export interface VideoResult {
+  productId: string;
+  videoPath: string;
+  thumbnailPath: string;
+  durationSeconds: number;
+  format: VideoFormat;
+  generationMethod: 'ffmpeg-slideshow' | 'kling' | 'runway';
+  producedAt: string;
+}
 
 export interface ScoreBreakdown {
   salesVelocity: number;

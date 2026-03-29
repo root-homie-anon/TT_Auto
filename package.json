@@ -13,6 +13,7 @@
     "dashboard:build": "cd dashboard && npm run build"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.80.0",
     "dotenv": "^16.4.0",
     "uuid": "^9.0.0"
   },

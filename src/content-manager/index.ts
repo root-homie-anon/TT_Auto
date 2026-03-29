@@ -74,13 +74,17 @@ export function buildPostingPackage(product: QueuedProduct, videoPath: string): 
     return null;
   }
 
+  // Validate video file exists before packaging
+  if (!existsSync(videoPath)) {
+    console.error(`[content-manager] Video file not found: ${videoPath}`);
+    return null;
+  }
+
   const dir = readyDir(product.tiktokShopId);
 
   // Copy video to ready folder
   const destVideo = resolve(dir, 'video.mp4');
-  if (existsSync(videoPath)) {
-    copyFileSync(videoPath, destVideo);
-  }
+  copyFileSync(videoPath, destVideo);
 
   // Generate caption
   const hashtags = [

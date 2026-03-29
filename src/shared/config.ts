@@ -44,6 +44,7 @@ export interface AppConfig {
     fallbackGenerator: string;
     targetAspectRatio: string;
     targetResolution: string;
+    fontPath: string;
   };
   posting: {
     optimalTimes: string[];
