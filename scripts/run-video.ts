@@ -6,6 +6,7 @@ import { getProjectRoot } from '../src/shared/config.js';
 import { writeScript } from '../src/scriptwriter/index.js';
 import { produceVideo } from '../src/video-producer/index.js';
 import { buildPostingPackage } from '../src/content-manager/index.js';
+import { acquireLock, releaseLock, getLockInfo } from '../src/shared/lock.js';
 import type { AssetManifest, ProductScript } from '../src/shared/types.js';
 
 async function main(): Promise<void> {
@@ -36,6 +37,12 @@ async function main(): Promise<void> {
 
   if (!product) {
     console.error(`Product not found: ${productId}`);
+    process.exit(1);
+  }
+
+  if (!acquireLock('run-video')) {
+    const info = getLockInfo();
+    console.error(`Pipeline is locked by process ${info?.pid} (${info?.label}) since ${info?.since}`);
     process.exit(1);
   }
 
@@ -96,6 +103,8 @@ async function main(): Promise<void> {
   if (pkg) {
     console.log(`\nPosting package created at: output/ready/${product.tiktokShopId}/`);
   }
+
+  releaseLock();
 }
 
 main();

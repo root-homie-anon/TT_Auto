@@ -8,6 +8,7 @@ import { analyzePerformance, generateSignals } from '../src/analyst/index.js';
 import { readProductQueue, readErrors, writeLastRun, trimErrors } from '../src/shared/state.js';
 import { resolve } from 'path';
 import { getProjectRoot, validateEnvironment } from '../src/shared/config.js';
+import { acquireLock, releaseLock, getLockInfo } from '../src/shared/lock.js';
 
 function printSummary(stats: {
   elapsed: string;
@@ -46,6 +47,12 @@ async function main(): Promise<void> {
   console.log('\n=== Health is Wealth — Full Pipeline ===\n');
 
   validateEnvironment();
+
+  if (!acquireLock('pipeline')) {
+    const info = getLockInfo();
+    console.error(`Pipeline is locked by process ${info?.pid} (${info?.label}) since ${info?.since}`);
+    process.exit(1);
+  }
 
   // Trim old errors at start of each run
   trimErrors();
@@ -148,6 +155,8 @@ async function main(): Promise<void> {
       videosProduced,
       errors,
     });
+
+    releaseLock();
   }
 }
 

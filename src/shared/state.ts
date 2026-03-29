@@ -9,7 +9,10 @@ import type {
   PipelineError,
   ResearchLogEntry,
   AnalystSignals,
+  ProductStatus,
 } from './types.js';
+
+const FAILED_STATUSES: ProductStatus[] = ['assets_failed', 'script_failed', 'video_failed'];
 
 function statePath(filename: string): string {
   const dir = resolve(getProjectRoot(), 'state');
@@ -97,6 +100,24 @@ export function trimErrors(): void {
     console.log(`[state] Trimmed ${errors.length - trimmed.length} errors older than ${ERROR_RETENTION_DAYS} days`);
     writeJson('errors.json', trimmed);
   }
+}
+
+// Product helpers
+export function updateProduct(productId: string, update: Partial<QueuedProduct>): void {
+  const queue = readProductQueue();
+  const idx = queue.findIndex((p) => p.id === productId || p.tiktokShopId === productId);
+  if (idx === -1) return;
+  Object.assign(queue[idx]!, update);
+  writeProductQueue(queue);
+}
+
+export function getFailedProducts(maxRetries: number = 3): QueuedProduct[] {
+  const queue = readProductQueue();
+  return queue.filter(
+    (p) =>
+      FAILED_STATUSES.includes(p.status) &&
+      (p.retryCount ?? 0) < maxRetries,
+  );
 }
 
 // Analyst signals

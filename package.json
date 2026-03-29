@@ -13,6 +13,7 @@
     "queue": "tsx scripts/check-queue.ts",
     "update-perf": "tsx scripts/update-performance.ts",
     "update-commission": "tsx scripts/update-commission.ts",
+    "retry": "tsx scripts/run-retry.ts",
     "report": "tsx scripts/weekly-report.ts",
     "dashboard": "cd dashboard && npm run dev",
     "dashboard:build": "cd dashboard && npm run build"

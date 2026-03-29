@@ -15,7 +15,8 @@ export type ProductStatus =
   | 'video_ready'
   | 'video_failed'
   | 'post_ready'
-  | 'posted';
+  | 'posted'
+  | 'dead_letter';
 
 export type VideoFormat =
   | 'voiceover'
@@ -79,6 +80,16 @@ export interface QueuedProduct {
   reviewCount: number;
   sellerName: string;
   imageUrl: string;
+  retryCount?: number;
+  lastRetryAt?: string;
+  failHistory?: FailRecord[];
+}
+
+export interface FailRecord {
+  status: ProductStatus;
+  error: string;
+  timestamp: string;
+  attempt: number;
 }
 
 export interface AssetManifest {

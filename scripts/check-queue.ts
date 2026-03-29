@@ -34,6 +34,28 @@ function main(): void {
     }
   }
 
+  // Failed products
+  const failed = queue.filter((p) =>
+    p.status === 'assets_failed' || p.status === 'script_failed' || p.status === 'video_failed',
+  );
+  if (failed.length > 0) {
+    console.log(`\nFailed (${failed.length}):`);
+    for (const p of failed) {
+      const retries = p.retryCount ?? 0;
+      console.log(`  [${p.status}] ${retries > 0 ? `${retries} retries ` : ''}${p.productName.slice(0, 50)}`);
+    }
+    console.log('  Run: npm run retry');
+  }
+
+  // Dead-letter products
+  const deadLetters = queue.filter((p) => p.status === 'dead_letter');
+  if (deadLetters.length > 0) {
+    console.log(`\nDead-lettered (${deadLetters.length}):`);
+    for (const p of deadLetters) {
+      console.log(`  ${p.tiktokShopId}  ${p.retryCount ?? 0} retries  ${p.productName.slice(0, 50)}`);
+    }
+  }
+
   // Video queue
   const videoQueue = readVideoQueue();
   if (videoQueue.length > 0) {
