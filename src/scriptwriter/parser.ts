@@ -51,6 +51,9 @@ export function parseScriptResponse(
 
   const overlays: TextOverlay[] = (parsed.overlays ?? [])
     .filter((o): o is { text: string; startSecond: number; endSecond: number } =>
+      o !== null &&
+      o !== undefined &&
+      typeof o === 'object' &&
       typeof o.text === 'string' &&
       typeof o.startSecond === 'number' &&
       typeof o.endSecond === 'number',
