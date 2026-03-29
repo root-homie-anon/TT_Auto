@@ -6,6 +6,22 @@ import { generateVoiceover } from './tts.js';
 import { assembleVideo, checkFfmpeg } from './assembler.js';
 import type { QueuedProduct, AssetManifest, ProductScript, VideoResult } from '../shared/types.js';
 
+const MIN_IMAGES = 2;
+
+function validateInputs(manifest: AssetManifest, script: ProductScript): string | null {
+  const existingImages = manifest.images.filter((img) => existsSync(img));
+  if (existingImages.length < MIN_IMAGES) {
+    return `Only ${existingImages.length} images exist on disk (need ${MIN_IMAGES})`;
+  }
+  if (!script.hook?.text) {
+    return 'Script has no hook text';
+  }
+  if (!script.overlays || !Array.isArray(script.overlays)) {
+    return 'Script has no overlays array';
+  }
+  return null;
+}
+
 function todayDir(): string {
   const date = new Date().toISOString().split('T')[0]!;
   const dir = resolve(getProjectRoot(), 'output', date);
@@ -132,6 +148,25 @@ export async function produceAllVideos(): Promise<number> {
         timestamp: new Date().toISOString(),
         agent: 'video-producer',
         message: `Missing ${missing} file on disk for script_ready product`,
+        productId: product.tiktokShopId,
+      });
+
+      const currentQueue = readProductQueue();
+      const idx = currentQueue.findIndex((p) => p.id === product.id);
+      if (idx !== -1) {
+        currentQueue[idx]!.status = 'video_failed';
+        writeProductQueue(currentQueue);
+      }
+      continue;
+    }
+
+    const inputError = validateInputs(manifest, script);
+    if (inputError) {
+      console.error(`[video-producer] Input validation failed for ${product.tiktokShopId}: ${inputError}`);
+      appendError({
+        timestamp: new Date().toISOString(),
+        agent: 'video-producer',
+        message: `Input validation failed: ${inputError}`,
         productId: product.tiktokShopId,
       });
 

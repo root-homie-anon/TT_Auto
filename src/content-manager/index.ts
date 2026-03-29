@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, copyFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { loadConfig, getProjectRoot } from '../shared/config.js';
 import {
@@ -74,9 +74,14 @@ export function buildPostingPackage(product: QueuedProduct, videoPath: string): 
     return null;
   }
 
-  // Validate video file exists before packaging
+  // Validate video file exists and is non-empty before packaging
   if (!existsSync(videoPath)) {
     console.error(`[content-manager] Video file not found: ${videoPath}`);
+    return null;
+  }
+  const videoSize = statSync(videoPath).size;
+  if (videoSize === 0) {
+    console.error(`[content-manager] Video file is empty (0 bytes): ${videoPath}`);
     return null;
   }
 

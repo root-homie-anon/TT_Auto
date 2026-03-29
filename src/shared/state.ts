@@ -86,6 +86,19 @@ export function appendError(error: PipelineError): void {
   writeJson('errors.json', errors);
 }
 
+const ERROR_RETENTION_DAYS = 7;
+
+export function trimErrors(): void {
+  const errors = readErrors();
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - ERROR_RETENTION_DAYS);
+  const trimmed = errors.filter((e) => new Date(e.timestamp) > cutoff);
+  if (trimmed.length < errors.length) {
+    console.log(`[state] Trimmed ${errors.length - trimmed.length} errors older than ${ERROR_RETENTION_DAYS} days`);
+    writeJson('errors.json', trimmed);
+  }
+}
+
 // Analyst signals
 export function readAnalystSignals(): AnalystSignals | null {
   return readJson<AnalystSignals | null>('analyst-signals.json', null);

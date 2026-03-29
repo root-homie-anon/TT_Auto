@@ -6,6 +6,7 @@ import { PerformanceTable } from '@/components/performance-table';
 import { ResearchLog } from '@/components/research-log';
 import { AnalystPanel } from '@/components/analyst-panel';
 import { ErrorLog } from '@/components/error-log';
+import { LastRunPanel } from '@/components/last-run-panel';
 
 export const dynamic = 'force-dynamic';
 
@@ -108,9 +109,12 @@ export default function Dashboard() {
           />
         </section>
 
-        {/* Pipeline Progress */}
-        <section>
-          <PipelineStages counts={statusCounts} />
+        {/* Pipeline Progress + Last Run */}
+        <section className="grid gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2">
+            <PipelineStages counts={statusCounts} />
+          </div>
+          <LastRunPanel lastRun={data.lastRun} />
         </section>
 
         {/* Product Queue */}

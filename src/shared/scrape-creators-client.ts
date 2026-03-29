@@ -166,6 +166,8 @@ export function parseCount(value: string | number): number {
 
 // --- Client ---
 
+const RETRYABLE_CODES = new Set([429, 500, 502, 503, 504]);
+
 export class ScrapeCreatorsError extends Error {
   constructor(
     message: string,
@@ -195,28 +197,51 @@ export class ScrapeCreatorsClient {
   }
 
   private async request<T>(endpoint: string, params: Record<string, string>): Promise<T> {
+    const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
     const url = new URL(`${this.baseUrl}${endpoint}`);
     for (const [key, value] of Object.entries(params)) {
       url.searchParams.set(key, value);
     }
 
-    const response = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-        'x-api-key': this.apiKey,
-      },
-    });
+    const MAX_ATTEMPTS = 3;
+    let lastError: ScrapeCreatorsError | null = null;
 
-    if (!response.ok) {
-      throw new ScrapeCreatorsError(
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          'x-api-key': this.apiKey,
+        },
+      });
+
+      if (response.ok) {
+        const data = (await response.json()) as T;
+        return data;
+      }
+
+      const error = new ScrapeCreatorsError(
         `API request failed: ${response.statusText}`,
         response.status,
         endpoint,
       );
+
+      if (!RETRYABLE_CODES.has(response.status)) {
+        throw error;
+      }
+
+      lastError = error;
+
+      if (attempt < MAX_ATTEMPTS) {
+        const delayMs = 1000 * Math.pow(2, attempt - 1);
+        console.warn(
+          `[ScrapeCreatorsClient] Retryable error ${response.status} on ${endpoint} — attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${delayMs}ms`,
+        );
+        await sleep(delayMs);
+      }
     }
 
-    const data = (await response.json()) as T;
-    return data;
+    throw lastError!;
   }
 
   async searchProducts(query: string, page: number = 1): Promise<SCSearchResponse> {

@@ -9,11 +9,23 @@ import { parseScriptResponse, ScriptParseError } from './parser.js';
 import type { QueuedProduct, AssetManifest, ProductScript } from '../shared/types.js';
 
 const MAX_RETRIES = 1;
+const MIN_IMAGES = 3;
 
 function loadManifest(productId: string): AssetManifest | null {
   const path = resolve(getProjectRoot(), 'output', 'assets', productId, 'meta.json');
   if (!existsSync(path)) return null;
   return JSON.parse(readFileSync(path, 'utf-8')) as AssetManifest;
+}
+
+function validateManifestAssets(manifest: AssetManifest): string | null {
+  const existingImages = manifest.images.filter((img) => existsSync(img));
+  if (existingImages.length < MIN_IMAGES) {
+    return `Only ${existingImages.length}/${manifest.images.length} images exist on disk (need ${MIN_IMAGES})`;
+  }
+  if (manifest.hasVideo && manifest.videoPath && !existsSync(manifest.videoPath)) {
+    console.log(`[scriptwriter] Product video missing at ${manifest.videoPath} — continuing without it`);
+  }
+  return null;
 }
 
 function saveScript(productId: string, script: ProductScript): void {
@@ -94,6 +106,25 @@ export async function writeAllScripts(): Promise<void> {
         timestamp: new Date().toISOString(),
         agent: 'scriptwriter',
         message: 'Asset manifest not found',
+        productId: product.tiktokShopId,
+      });
+
+      const currentQueue = readProductQueue();
+      const idx = currentQueue.findIndex((p) => p.id === product.id);
+      if (idx !== -1) {
+        currentQueue[idx]!.status = 'script_failed';
+        writeProductQueue(currentQueue);
+      }
+      continue;
+    }
+
+    const assetError = validateManifestAssets(manifest);
+    if (assetError) {
+      console.error(`[scriptwriter] Asset validation failed for ${product.tiktokShopId}: ${assetError}`);
+      appendError({
+        timestamp: new Date().toISOString(),
+        agent: 'scriptwriter',
+        message: `Asset validation failed: ${assetError}`,
         productId: product.tiktokShopId,
       });
 

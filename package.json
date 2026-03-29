@@ -9,6 +9,8 @@
     "research": "tsx scripts/run-researcher.ts",
     "video": "tsx scripts/run-video.ts",
     "queue": "tsx scripts/check-queue.ts",
+    "update-perf": "tsx scripts/update-performance.ts",
+    "report": "tsx scripts/weekly-report.ts",
     "dashboard": "cd dashboard && npm run dev",
     "dashboard:build": "cd dashboard && npm run build"
   },
