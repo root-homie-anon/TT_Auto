@@ -101,7 +101,12 @@ export function buildPostingPackage(product: QueuedProduct, videoPath: string): 
     '#wellness',
   ];
 
-  const caption = `${product.productName}\n\n🔗 Link in bio or search TikTok Shop\n\n${hashtags.join(' ')}`;
+  const config = loadConfig();
+  const hasAffiliateAccess = !config.channel.pilotProgramActive;
+
+  const caption = hasAffiliateAccess
+    ? `${product.productName}\n\n🔗 Link in bio or search TikTok Shop\n\n${hashtags.join(' ')}`
+    : `${product.productName}\n\n${hashtags.join(' ')}`;
 
   // Write caption file
   writeFileSync(resolve(dir, 'caption.txt'), caption, 'utf-8');
@@ -119,7 +124,7 @@ export function buildPostingPackage(product: QueuedProduct, videoPath: string): 
     `Shop performance: ${product.shopPerformanceScore}%`,
     '',
     'Posting checklist:',
-    '- [ ] Add TikTok Shop product link',
+    ...(hasAffiliateAccess ? ['- [ ] Add TikTok Shop product link'] : ['- [ ] NO affiliate link (pilot phase — building subscribers)']),
     '- [ ] Verify video plays correctly',
     '- [ ] Copy caption from caption.txt',
     '- [ ] Post at suggested time for best reach',
