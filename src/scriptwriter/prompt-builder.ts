@@ -29,6 +29,7 @@ export function buildScriptPrompt(
 - Price: ${manifest.price}
 - Category: ${category}
 - Key Benefits: ${manifest.keyBenefits.join(', ') || 'general health improvement'}
+- Ingredients/Specs: ${manifest.ingredientsOrSpecs.length > 0 ? manifest.ingredientsOrSpecs.join(', ') : 'not specified'}
 - Description: ${manifest.description}
 - Top Reviews:
 ${reviewQuotes || 'No reviews available'}

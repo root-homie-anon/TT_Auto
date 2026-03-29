@@ -87,6 +87,71 @@ function extractBenefits(details: SCProductDetailResponse): string[] {
   return benefits.slice(0, 6);
 }
 
+function extractSpecs(details: SCProductDetailResponse): string[] {
+  const specs: Set<string> = new Set();
+  const title = details.product_base.title.toLowerCase();
+
+  // Common health product ingredients and specs found in titles
+  const ingredientPatterns = [
+    /(\d+\s*mg)\b/gi,           // dosage: "500mg", "1000 mg"
+    /(\d+\s*mcg)\b/gi,          // micrograms
+    /(\d+\s*iu)\b/gi,           // international units
+    /(\d+\s*billion\s*cfu)\b/gi, // probiotic count
+    /(\d+\s*count)\b/gi,        // count per bottle
+    /(\d+\s*capsules?)\b/gi,    // capsule count
+    /(\d+\s*gummies)\b/gi,      // gummy count
+    /(\d+\s*tablets?)\b/gi,     // tablet count
+    /(\d+\s*oz)\b/gi,           // weight/volume
+    /(\d+\s*ml)\b/gi,           // milliliters
+  ];
+
+  for (const pattern of ingredientPatterns) {
+    const matches = details.product_base.title.match(pattern);
+    if (matches) {
+      for (const match of matches) {
+        specs.add(match.trim());
+      }
+    }
+  }
+
+  // Known supplement ingredients
+  const ingredients = [
+    'vitamin d', 'vitamin c', 'vitamin b12', 'vitamin b6', 'vitamin k',
+    'magnesium', 'zinc', 'iron', 'calcium', 'potassium', 'selenium',
+    'collagen', 'biotin', 'melatonin', 'ashwagandha', 'turmeric',
+    'omega-3', 'fish oil', 'probiotics', 'elderberry', 'echinacea',
+    'ginseng', 'coq10', 'l-theanine', 'creatine', 'protein',
+    'hyaluronic acid', 'glucosamine', 'chondroitin', 'mct oil',
+    'apple cider vinegar', 'spirulina', 'chlorella', 'berberine',
+  ];
+
+  for (const ingredient of ingredients) {
+    if (title.includes(ingredient)) {
+      specs.add(ingredient);
+    }
+  }
+
+  // Check reviews for ingredient mentions
+  const reviews = details.product_detail_review?.review_items ?? [];
+  for (const review of reviews.slice(0, 5)) {
+    const text = review.review.display_text.toLowerCase();
+    for (const ingredient of ingredients) {
+      if (text.includes(ingredient) && !specs.has(ingredient)) {
+        specs.add(ingredient);
+      }
+    }
+  }
+
+  const result = [...specs].slice(0, 10);
+  if (result.length === 0) {
+    console.log('[asset-collector] No ingredients/specs found in product data');
+  } else {
+    console.log(`[asset-collector] Extracted ${result.length} specs: ${result.join(', ')}`);
+  }
+
+  return result;
+}
+
 export async function collectAssets(product: QueuedProduct): Promise<AssetManifest | null> {
   const client = new ScrapeCreatorsClient();
 
@@ -198,7 +263,7 @@ export async function collectAssets(product: QueuedProduct): Promise<AssetManife
     commissionRate: null,
     description: productBase.title,
     keyBenefits: benefits,
-    ingredientsOrSpecs: [],
+    ingredientsOrSpecs: extractSpecs(details),
     topReviews: reviews,
     images: savedImages,
     hasVideo,
