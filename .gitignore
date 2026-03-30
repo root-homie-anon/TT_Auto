@@ -13,6 +13,11 @@ output/
 
 # Build
 dist/
+*.tsbuildinfo
+
+# Next.js
+dashboard/.next/
+dashboard/next-env.d.ts
 
 # OS
 .DS_Store
