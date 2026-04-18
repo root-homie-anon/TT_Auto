@@ -14,7 +14,8 @@
   "pipeline": {
     "productsPerRun": 5,
     "videoFormats": ["voiceover", "hook-text", "demo"],
-    "autoSelectFormat": true
+    "autoSelectFormat": true,
+    "schedule": "02:00"
   },
   "sources": {
     "scrapeCreators": {
