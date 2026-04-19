@@ -59,3 +59,10 @@ Deferred until revenue milestone. No backlog items yet.
 - [ ] **OQ1.** Is `Kling` actually intended as primary video generator, or is that aspirational config? Confirm before D3 design work.
 - [ ] **OQ2.** What's the real-world hit rate on ScrapeCreators search quality? Is there a signal in the research-log suggesting we need a second source despite the plan excluding one?
 - [ ] **OQ3.** Does the pilot-cap logic (5/week) correctly count across a calendar week boundary (Sun→Mon) vs. a rolling 7-day window? CLAUDE.md says "per week" — confirm which semantics shipped. *Related: TD4.*
+
+---
+
+## Done
+
+### Phase A — Daily-Run Discipline
+- **A1.** Cron wrapper script — `scripts/cron-run.sh` + `pipeline.schedule: "02:00"` in config.json + `logs/` dir + `.gitignore` entry — `feature/cron-wrapper` (2026-04-18). Lock contention delegated to Node's acquireLock (signal-0 PID check); wrapper propagates pipeline exit code. 99 Vitest tests still green.
