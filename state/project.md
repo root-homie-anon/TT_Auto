@@ -61,3 +61,17 @@ Marcus routes; Tony audits design changes before implementation; Doug implements
 
 ## Default Stack Alignment
 User preference is local Postgres + Auth.js + filesystem storage. TT_Auto currently uses **filesystem JSON state only** — no DB, no auth (it's a single-operator CLI). No Supabase anywhere. No migration needed.
+---
+
+## Git Strategy (active 2026-04-19)
+
+**Linear on `main`. No feature branches. No `dev`. No PRs.**
+
+- One task = one conventional commit (`feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`) committed directly to `main`.
+- Push only on explicit user confirmation in the current session.
+- `~/.claude/hooks/pre-bash-git-guard.sh` still blocks `--no-verify`, force-push to main, secret-bearing paths, and staged secrets — those rules are non-negotiable.
+- Full rules: `~/.claude/docs/rules/git.md`.
+
+**Cleanup history:** all prior `feature/*` branches and any `dev` branch were intentionally deleted on 2026-04-19 after being fast-forwarded into `main`. Branch sprawl was costing more time than it was saving for a solo dev. **Do not recreate them.** If `git branch` shows only `main`, that is the correct state — not a sign of missing work.
+
+**Branch exception (does not apply to this repo):** closely-coupled monorepos like Strong-Tower-Studio or lolight/yacad use `product/<slug>` branches because each branch maps to a distinct product variant.
