@@ -15,7 +15,8 @@
     "productsPerRun": 5,
     "videoFormats": ["voiceover", "hook-text", "demo"],
     "autoSelectFormat": true,
-    "schedule": "02:00"
+    "schedule": "02:00",
+    "maxRunMinutes": 60
   },
   "sources": {
     "scrapeCreators": {

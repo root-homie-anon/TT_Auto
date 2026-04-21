@@ -168,6 +168,7 @@ export interface LastRun {
 export interface PipelineError {
   timestamp: string;
   agent: string;
+  level?: 'info' | 'warn' | 'error';
   message: string;
   productId?: string;
   details?: string;

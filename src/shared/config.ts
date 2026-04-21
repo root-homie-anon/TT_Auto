@@ -19,6 +19,7 @@ export interface AppConfig {
     productsPerRun: number;
     videoFormats: string[];
     autoSelectFormat: boolean;
+    maxRunMinutes?: number;
   };
   sources: {
     scrapeCreators: {
