@@ -93,11 +93,25 @@ export interface AnalystSignals {
   notes: string;
 }
 
+export type PipelineStage =
+  | 'research'
+  | 'assets'
+  | 'script'
+  | 'video'
+  | 'package'
+  | 'analyst'
+  | 'done'
+  | 'failed';
+
 export interface LastRun {
   timestamp: string;
   productsFound: number;
   videosProduced: number;
   errors: string[];
+  currentStage?: PipelineStage;
+  stageStartedAt?: string;
+  successCount?: number;
+  failCount?: number;
 }
 
 export interface PipelineError {
@@ -116,6 +130,26 @@ export interface DashboardData {
   lastRun: LastRun | null;
   errors: PipelineError[];
   config: Record<string, unknown>;
+  liveRunning: boolean;
+}
+
+function readLiveRunning(): boolean {
+  const lockPath = resolve(STATE_DIR, '.lock');
+  if (!existsSync(lockPath)) return false;
+  try {
+    const lines = readFileSync(lockPath, 'utf-8').split('\n');
+    const pid = parseInt(lines[0] ?? '', 10);
+    if (isNaN(pid)) return false;
+    // Signal 0 = existence check — does not send a signal, just checks PID
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  } catch {
+    return false;
+  }
 }
 
 export function getAllState(): DashboardData {
@@ -135,5 +169,6 @@ export function getAllState(): DashboardData {
     lastRun: readJson<LastRun | null>('last-run.json', null),
     errors: readJson<PipelineError[]>('errors.json', []),
     config,
+    liveRunning: readLiveRunning(),
   };
 }
