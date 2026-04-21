@@ -158,11 +158,23 @@ export interface AnalystSignals {
   notes: string;
 }
 
+export type PipelineStage =
+  | 'research'
+  | 'assets'
+  | 'script'
+  | 'video'
+  | 'package'
+  | 'analyst'
+  | 'done'
+  | 'failed';
+
 export interface LastRun {
   timestamp: string;
   productsFound: number;
   videosProduced: number;
   errors: string[];
+  currentStage: PipelineStage;
+  stageStartedAt: string;
 }
 
 export interface PipelineError {

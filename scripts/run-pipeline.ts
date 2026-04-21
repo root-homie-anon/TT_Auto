@@ -6,6 +6,7 @@ import { produceAllVideos } from '../src/video-producer/index.js';
 import { buildPostingPackage, getDailyBriefing } from '../src/content-manager/index.js';
 import { analyzePerformance, generateSignals } from '../src/analyst/index.js';
 import { readProductQueue, readErrors, writeLastRun, trimErrors } from '../src/shared/state.js';
+import type { PipelineStage } from '../src/shared/types.js';
 import { resolve } from 'path';
 import { getProjectRoot, validateEnvironment } from '../src/shared/config.js';
 import { acquireLock, releaseLock, getLockInfo } from '../src/shared/lock.js';
@@ -63,9 +64,22 @@ async function main(): Promise<void> {
   let videosProduced = 0;
   let packaged = 0;
 
+  // Helper to write a per-stage heartbeat into last-run.json
+  function writeHeartbeat(stage: PipelineStage): void {
+    writeLastRun({
+      timestamp: new Date().toISOString(),
+      productsFound,
+      videosProduced,
+      errors: [...errors],
+      currentStage: stage,
+      stageStartedAt: new Date().toISOString(),
+    });
+  }
+
   try {
     // Step 1: Research
     console.log('--- Step 1: Research ---');
+    writeHeartbeat('research');
     const products = await runResearcher();
     productsFound = products.length;
 
@@ -76,18 +90,22 @@ async function main(): Promise<void> {
 
     // Step 2: Collect assets
     console.log('\n--- Step 2: Asset Collection ---');
+    writeHeartbeat('assets');
     await collectAllAssets();
 
     // Step 3: Generate scripts
     console.log('\n--- Step 3: Script Generation ---');
+    writeHeartbeat('script');
     await writeAllScripts();
 
     // Step 4: Produce videos
     console.log('\n--- Step 4: Video Production ---');
+    writeHeartbeat('video');
     videosProduced = await produceAllVideos();
 
     // Step 5: Package for posting
     console.log('\n--- Step 5: Content Packaging ---');
+    writeHeartbeat('package');
     const queue = readProductQueue();
     const videoReady = queue.filter((p) => p.status === 'video_ready');
     const today = new Date().toISOString().split('T')[0]!;
@@ -104,6 +122,7 @@ async function main(): Promise<void> {
 
     // Step 6: Update analyst signals + performance analysis
     console.log('\n--- Step 6: Analyst ---');
+    writeHeartbeat('analyst');
     generateSignals();
     analyzePerformance();
 
@@ -149,11 +168,14 @@ async function main(): Promise<void> {
       errors,
     });
 
+    const terminalStage: PipelineStage = errors.length > 0 ? 'failed' : 'done';
     writeLastRun({
       timestamp: new Date().toISOString(),
       productsFound,
       videosProduced,
       errors,
+      currentStage: terminalStage,
+      stageStartedAt: new Date().toISOString(),
     });
 
     releaseLock();

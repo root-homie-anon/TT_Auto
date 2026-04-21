@@ -31,8 +31,8 @@ vi.mock('../config.js', () => ({
   }),
 }));
 
-import { trimErrors } from '../state.js';
-import type { PipelineError } from '../types.js';
+import { trimErrors, writeLastRun, readLastRun } from '../state.js';
+import type { PipelineError, LastRun } from '../types.js';
 
 function makeError(daysOld: number, agent = 'researcher'): PipelineError {
   const ts = new Date();
@@ -152,5 +152,95 @@ describe('trimErrors', () => {
     // errors at 0-6 days old are kept (7 entries); 7 days old and beyond are removed
     expect(written.length).toBeLessThanOrEqual(7);
     expect(written.length).toBeGreaterThan(0);
+  });
+});
+
+describe('writeLastRun / readLastRun — stage heartbeat', () => {
+  beforeEach(() => {
+    mockExistsSync.mockReturnValue(true);
+    mockMkdirSync.mockReturnValue(undefined);
+    mockWriteFileSync.mockClear();
+    mockReadFileSync.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('persists currentStage and stageStartedAt when writing a heartbeat', () => {
+    const now = new Date().toISOString();
+    const run: LastRun = {
+      timestamp: now,
+      productsFound: 3,
+      videosProduced: 0,
+      errors: [],
+      currentStage: 'assets',
+      stageStartedAt: now,
+    };
+
+    writeLastRun(run);
+
+    expect(mockWriteFileSync).toHaveBeenCalledOnce();
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0]?.[1] as string) as LastRun;
+    expect(written.currentStage).toBe('assets');
+    expect(written.stageStartedAt).toBe(now);
+  });
+
+  it('reads back the stage written by writeLastRun', () => {
+    const now = new Date().toISOString();
+    const run: LastRun = {
+      timestamp: now,
+      productsFound: 5,
+      videosProduced: 2,
+      errors: [],
+      currentStage: 'done',
+      stageStartedAt: now,
+    };
+
+    mockReadFileSync.mockReturnValue(JSON.stringify(run));
+
+    const result = readLastRun();
+    expect(result?.currentStage).toBe('done');
+    expect(result?.stageStartedAt).toBe(now);
+  });
+
+  it('records failed stage when pipeline errors exist', () => {
+    const now = new Date().toISOString();
+    const run: LastRun = {
+      timestamp: now,
+      productsFound: 2,
+      videosProduced: 0,
+      errors: ['Video generation timed out'],
+      currentStage: 'failed',
+      stageStartedAt: now,
+    };
+
+    writeLastRun(run);
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0]?.[1] as string) as LastRun;
+    expect(written.currentStage).toBe('failed');
+    expect(written.errors).toHaveLength(1);
+  });
+
+  it('stage transitions across all valid values are accepted by the type', () => {
+    const stages: LastRun['currentStage'][] = [
+      'research', 'assets', 'script', 'video', 'package', 'analyst', 'done', 'failed',
+    ];
+    const now = new Date().toISOString();
+
+    for (const stage of stages) {
+      mockWriteFileSync.mockClear();
+      const run: LastRun = {
+        timestamp: now,
+        productsFound: 0,
+        videosProduced: 0,
+        errors: [],
+        currentStage: stage,
+        stageStartedAt: now,
+      };
+      writeLastRun(run);
+      const written = JSON.parse(mockWriteFileSync.mock.calls[0]?.[1] as string) as LastRun;
+      expect(written.currentStage).toBe(stage);
+    }
   });
 });

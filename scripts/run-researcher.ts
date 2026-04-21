@@ -28,6 +28,8 @@ async function main(): Promise<void> {
       productsFound: products.length,
       videosProduced: 0,
       errors,
+      currentStage: 'done',
+      stageStartedAt: new Date().toISOString(),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -39,6 +41,8 @@ async function main(): Promise<void> {
       productsFound: 0,
       videosProduced: 0,
       errors,
+      currentStage: 'failed',
+      stageStartedAt: new Date().toISOString(),
     });
 
     process.exit(1);
