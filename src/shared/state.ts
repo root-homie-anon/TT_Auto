@@ -11,6 +11,13 @@ import type {
   AnalystSignals,
   ProductStatus,
 } from './types.js';
+import {
+  RETRYABLE_STATUSES,
+  resolvePolicy,
+  isStructuralFailure,
+  type FailedStatus,
+  type RetryConfigOverrides,
+} from './retry-policy.js';
 
 const FAILED_STATUSES: ProductStatus[] = ['assets_failed', 'script_failed', 'video_failed'];
 
@@ -111,6 +118,12 @@ export function updateProduct(productId: string, update: Partial<QueuedProduct>)
   writeProductQueue(queue);
 }
 
+/**
+ * @deprecated Use {@link getRetryableProducts} instead. This function applies a
+ * single global maxRetries cap and ignores per-stage cooldowns and structural-failure
+ * filters defined in the retry-policy contract. It will be removed once all callers
+ * have migrated.
+ */
 export function getFailedProducts(maxRetries: number = 3): QueuedProduct[] {
   const queue = readProductQueue();
   return queue.filter(
@@ -118,6 +131,52 @@ export function getFailedProducts(maxRetries: number = 3): QueuedProduct[] {
       FAILED_STATUSES.includes(p.status) &&
       (p.retryCount ?? 0) < maxRetries,
   );
+}
+
+/**
+ * Returns products eligible for automatic retry per the B0 retry-policy contract.
+ *
+ * A product is retryable if ALL of the following hold:
+ * 1. Its status is one of `assets_failed`, `script_failed`, or `video_failed`.
+ * 2. The count of FailRecord entries whose `status` matches the current failed status
+ *    is strictly less than the per-stage `maxAttempts` cap (per-stage, not global).
+ * 3. The cooldown has elapsed: `now - lastRetryAt >= cooldownMinutes` for the stage.
+ *    Products with no `lastRetryAt` are always eligible (never retried before).
+ * 4. The latest FailRecord does not contain a structural-failure substring for the stage
+ *    (those go to dead_letter, not retried).
+ *
+ * Config overrides via `config.json` `retry` block take precedence over policy defaults.
+ */
+export function getRetryableProducts(now: Date, overrides?: RetryConfigOverrides): QueuedProduct[] {
+  const queue = readProductQueue();
+  const retryable: QueuedProduct[] = [];
+
+  for (const product of queue) {
+    if (!RETRYABLE_STATUSES.includes(product.status as FailedStatus)) continue;
+
+    const failedStatus = product.status as FailedStatus;
+    const policy = resolvePolicy(failedStatus, overrides);
+    const history = product.failHistory ?? [];
+
+    // Per-stage attempt count: only records matching the current failed status
+    const stageAttempts = history.filter((r) => r.status === failedStatus).length;
+    if (stageAttempts >= policy.maxAttempts) continue;
+
+    // Structural-failure check against the latest FailRecord for this stage
+    const latestForStage = [...history].reverse().find((r) => r.status === failedStatus);
+    if (latestForStage && isStructuralFailure(failedStatus, latestForStage.error)) continue;
+
+    // Cooldown check
+    if (product.lastRetryAt) {
+      const lastRetry = new Date(product.lastRetryAt).getTime();
+      const cooldownMs = policy.cooldownMinutes * 60 * 1000;
+      if (now.getTime() - lastRetry < cooldownMs) continue;
+    }
+
+    retryable.push(product);
+  }
+
+  return retryable;
 }
 
 // Analyst signals

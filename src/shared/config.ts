@@ -58,6 +58,18 @@ export interface AppConfig {
     multiChannel: boolean;
     analystFeedbackLoop: boolean;
   };
+  retry?: {
+    maxAttempts?: {
+      assets?: number;
+      script?: number;
+      video?: number;
+    };
+    cooldownMinutes?: {
+      assets?: number;
+      script?: number;
+      video?: number;
+    };
+  };
 }
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '../../');

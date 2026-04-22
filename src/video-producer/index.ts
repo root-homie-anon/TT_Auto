@@ -4,7 +4,7 @@ import { getProjectRoot } from '../shared/config.js';
 import { readProductQueue, writeProductQueue, appendError } from '../shared/state.js';
 import { generateVoiceover } from './tts.js';
 import { assembleVideo, checkFfmpeg } from './assembler.js';
-import type { QueuedProduct, AssetManifest, ProductScript, VideoResult } from '../shared/types.js';
+import type { QueuedProduct, AssetManifest, ProductScript, VideoResult, FailRecord } from '../shared/types.js';
 
 const MIN_IMAGES = 2;
 
@@ -143,18 +143,27 @@ export async function produceAllVideos(): Promise<number> {
 
     if (!manifest || !script) {
       const missing = !manifest ? 'manifest' : 'script';
+      const errorMessage = `Missing ${missing} file on disk for script_ready product`;
       console.error(`[video-producer] Missing ${missing} for ${product.tiktokShopId} — marking as failed`);
       appendError({
         timestamp: new Date().toISOString(),
         agent: 'video-producer',
-        message: `Missing ${missing} file on disk for script_ready product`,
+        message: errorMessage,
         productId: product.tiktokShopId,
       });
 
       const currentQueue = readProductQueue();
       const idx = currentQueue.findIndex((p) => p.id === product.id);
       if (idx !== -1) {
-        currentQueue[idx]!.status = 'video_failed';
+        const updated = currentQueue[idx]!;
+        updated.status = 'video_failed';
+        const failRecord: FailRecord = {
+          status: 'video_failed',
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'video_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
         writeProductQueue(currentQueue);
       }
       continue;
@@ -162,18 +171,27 @@ export async function produceAllVideos(): Promise<number> {
 
     const inputError = validateInputs(manifest, script);
     if (inputError) {
+      const errorMessage = `Input validation failed: ${inputError}`;
       console.error(`[video-producer] Input validation failed for ${product.tiktokShopId}: ${inputError}`);
       appendError({
         timestamp: new Date().toISOString(),
         agent: 'video-producer',
-        message: `Input validation failed: ${inputError}`,
+        message: errorMessage,
         productId: product.tiktokShopId,
       });
 
       const currentQueue = readProductQueue();
       const idx = currentQueue.findIndex((p) => p.id === product.id);
       if (idx !== -1) {
-        currentQueue[idx]!.status = 'video_failed';
+        const updated = currentQueue[idx]!;
+        updated.status = 'video_failed';
+        const failRecord: FailRecord = {
+          status: 'video_failed',
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'video_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
         writeProductQueue(currentQueue);
       }
       continue;
@@ -184,7 +202,19 @@ export async function produceAllVideos(): Promise<number> {
     const currentQueue = readProductQueue();
     const idx = currentQueue.findIndex((p) => p.id === product.id);
     if (idx !== -1) {
-      currentQueue[idx]!.status = result ? 'video_ready' : 'video_failed';
+      const updated = currentQueue[idx]!;
+      if (result) {
+        updated.status = 'video_ready';
+      } else {
+        updated.status = 'video_failed';
+        const failRecord: FailRecord = {
+          status: 'video_failed',
+          error: 'Video production failed (see errors.json for details)',
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'video_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
+      }
       writeProductQueue(currentQueue);
     }
 

@@ -5,11 +5,20 @@ import { writeAllScripts } from '../src/scriptwriter/index.js';
 import { produceAllVideos } from '../src/video-producer/index.js';
 import { buildPostingPackage, getDailyBriefing } from '../src/content-manager/index.js';
 import { analyzePerformance, generateSignals } from '../src/analyst/index.js';
-import { readProductQueue, readErrors, writeLastRun, trimErrors } from '../src/shared/state.js';
+import {
+  readProductQueue,
+  readErrors,
+  writeLastRun,
+  trimErrors,
+  getRetryableProducts,
+  updateProduct,
+  appendError,
+} from '../src/shared/state.js';
 import type { PipelineStage } from '../src/shared/types.js';
 import { resolve } from 'path';
 import { getProjectRoot, validateEnvironment } from '../src/shared/config.js';
 import { acquireLock, releaseLock, getLockInfo } from '../src/shared/lock.js';
+import { FFMPEG_HALT_SUBSTRING, DEFAULT_STAGE_POLICIES } from '../src/shared/retry-policy.js';
 
 function printSummary(stats: {
   elapsed: string;
@@ -77,6 +86,62 @@ async function main(): Promise<void> {
   }
 
   try {
+    // Retry sweep — reset eligible failed products before research begins
+    console.log('--- Retry Sweep ---');
+    const sweepNow = new Date();
+    const retryable = getRetryableProducts(sweepNow);
+
+    if (retryable.length === 0) {
+      console.log('[retry-sweep] No products eligible for retry');
+    } else {
+      // Check for ffmpeg stage-wide halt: if any video_failed product's latest FailRecord
+      // contains the ffmpeg-missing signature, log and skip all video_failed retries.
+      const ffmpegHalt = retryable.some((p) => {
+        if (p.status !== 'video_failed') return false;
+        const latestVideoFail = [...(p.failHistory ?? [])].reverse().find((r) => r.status === 'video_failed');
+        return latestVideoFail?.error.includes(FFMPEG_HALT_SUBSTRING) ?? false;
+      });
+
+      if (ffmpegHalt) {
+        console.error('[retry-sweep] ffmpeg not installed or not in PATH — skipping all video_failed retries. Fix ffmpeg installation before re-running.');
+        appendError({
+          timestamp: sweepNow.toISOString(),
+          agent: 'retry-sweep',
+          level: 'error',
+          message: 'ffmpeg not installed or not in PATH — video_failed retries skipped for this run',
+        });
+      }
+
+      for (const product of retryable) {
+        // Skip video_failed products when ffmpeg halt is active
+        if (ffmpegHalt && product.status === 'video_failed') continue;
+
+        const fromState = product.status as keyof typeof DEFAULT_STAGE_POLICIES;
+        const policy = DEFAULT_STAGE_POLICIES[fromState];
+        const toState = policy.retryableTo;
+        const attempt = (product.retryCount ?? 0) + 1;
+
+        console.log(`[retry-sweep] ${product.id} (${product.productName.slice(0, 40)}) ${fromState} → ${toState} (attempt ${attempt})`);
+
+        updateProduct(product.id, {
+          status: toState,
+          retryCount: attempt,
+          lastRetryAt: sweepNow.toISOString(),
+        });
+
+        appendError({
+          timestamp: sweepNow.toISOString(),
+          agent: 'retry-sweep',
+          level: 'info',
+          message: `Retry sweep: reset ${fromState} → ${toState}`,
+          productId: product.id,
+          details: JSON.stringify({ fromState, toState, attempt }),
+        });
+      }
+
+      console.log(`[retry-sweep] Reset ${retryable.filter((p) => !(ffmpegHalt && p.status === 'video_failed')).length} product(s) for retry`);
+    }
+
     // Step 1: Research
     console.log('--- Step 1: Research ---');
     writeHeartbeat('research');

@@ -2,8 +2,8 @@ import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { ScrapeCreatorsClient, getDetailImageUrl } from '../shared/scrape-creators-client.js';
 import { getProjectRoot } from '../shared/config.js';
-import { readProductQueue, writeProductQueue, appendError } from '../shared/state.js';
-import type { QueuedProduct, AssetManifest, ReviewData } from '../shared/types.js';
+import { readProductQueue, writeProductQueue, appendError, readErrors } from '../shared/state.js';
+import type { QueuedProduct, AssetManifest, ReviewData, FailRecord } from '../shared/types.js';
 import type { SCProductDetailResponse } from '../shared/scrape-creators-client.js';
 
 const MIN_IMAGES = 3;
@@ -298,7 +298,23 @@ export async function collectAllAssets(): Promise<void> {
     const idx = currentQueue.findIndex((p) => p.id === product.id);
     if (idx !== -1) {
       const updated = currentQueue[idx]!;
-      updated.status = manifest ? 'assets_ready' : 'assets_failed';
+      if (manifest) {
+        updated.status = 'assets_ready';
+      } else {
+        updated.status = 'assets_failed';
+        // Find the most recent error written for this product during collectAssets
+        const allErrors = readErrors();
+        const latestError = [...allErrors]
+          .reverse()
+          .find((e) => e.productId === product.tiktokShopId && e.agent === 'asset-collector');
+        const failRecord: FailRecord = {
+          status: 'assets_failed',
+          error: latestError?.message ?? 'Asset collection failed (unknown reason)',
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'assets_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
+      }
       writeProductQueue(currentQueue);
     }
   }

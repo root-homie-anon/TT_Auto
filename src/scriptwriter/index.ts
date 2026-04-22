@@ -6,7 +6,7 @@ import { readProductQueue, writeProductQueue, appendError } from '../shared/stat
 import { selectFormat } from './format-selector.js';
 import { buildScriptPrompt } from './prompt-builder.js';
 import { parseScriptResponse, ScriptParseError } from './parser.js';
-import type { QueuedProduct, AssetManifest, ProductScript } from '../shared/types.js';
+import type { QueuedProduct, AssetManifest, ProductScript, FailRecord } from '../shared/types.js';
 
 const MAX_RETRIES = 1;
 const MIN_IMAGES = 3;
@@ -101,18 +101,27 @@ export async function writeAllScripts(): Promise<void> {
   for (const product of pending) {
     const manifest = loadManifest(product.tiktokShopId);
     if (!manifest) {
+      const errorMessage = 'Asset manifest not found';
       console.error(`[scriptwriter] No manifest found for ${product.tiktokShopId} — marking as failed`);
       appendError({
         timestamp: new Date().toISOString(),
         agent: 'scriptwriter',
-        message: 'Asset manifest not found',
+        message: errorMessage,
         productId: product.tiktokShopId,
       });
 
       const currentQueue = readProductQueue();
       const idx = currentQueue.findIndex((p) => p.id === product.id);
       if (idx !== -1) {
-        currentQueue[idx]!.status = 'script_failed';
+        const updated = currentQueue[idx]!;
+        updated.status = 'script_failed';
+        const failRecord: FailRecord = {
+          status: 'script_failed',
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'script_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
         writeProductQueue(currentQueue);
       }
       continue;
@@ -120,18 +129,27 @@ export async function writeAllScripts(): Promise<void> {
 
     const assetError = validateManifestAssets(manifest);
     if (assetError) {
+      const errorMessage = `Asset validation failed: ${assetError}`;
       console.error(`[scriptwriter] Asset validation failed for ${product.tiktokShopId}: ${assetError}`);
       appendError({
         timestamp: new Date().toISOString(),
         agent: 'scriptwriter',
-        message: `Asset validation failed: ${assetError}`,
+        message: errorMessage,
         productId: product.tiktokShopId,
       });
 
       const currentQueue = readProductQueue();
       const idx = currentQueue.findIndex((p) => p.id === product.id);
       if (idx !== -1) {
-        currentQueue[idx]!.status = 'script_failed';
+        const updated = currentQueue[idx]!;
+        updated.status = 'script_failed';
+        const failRecord: FailRecord = {
+          status: 'script_failed',
+          error: errorMessage,
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'script_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
         writeProductQueue(currentQueue);
       }
       continue;
@@ -142,7 +160,19 @@ export async function writeAllScripts(): Promise<void> {
     const currentQueue = readProductQueue();
     const idx = currentQueue.findIndex((p) => p.id === product.id);
     if (idx !== -1) {
-      currentQueue[idx]!.status = script ? 'script_ready' : 'script_failed';
+      const updated = currentQueue[idx]!;
+      if (script) {
+        updated.status = 'script_ready';
+      } else {
+        updated.status = 'script_failed';
+        const failRecord: FailRecord = {
+          status: 'script_failed',
+          error: 'Script generation failed (see errors.json for details)',
+          timestamp: new Date().toISOString(),
+          attempt: (updated.failHistory?.filter((r) => r.status === 'script_failed').length ?? 0) + 1,
+        };
+        updated.failHistory = [...(updated.failHistory ?? []), failRecord];
+      }
       writeProductQueue(currentQueue);
     }
   }

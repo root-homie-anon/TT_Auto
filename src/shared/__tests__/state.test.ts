@@ -31,8 +31,8 @@ vi.mock('../config.js', () => ({
   }),
 }));
 
-import { trimErrors, writeLastRun, readLastRun } from '../state.js';
-import type { PipelineError, LastRun } from '../types.js';
+import { trimErrors, writeLastRun, readLastRun, getRetryableProducts } from '../state.js';
+import type { PipelineError, LastRun, QueuedProduct, FailRecord } from '../types.js';
 
 function makeError(daysOld: number, agent = 'researcher'): PipelineError {
   const ts = new Date();
@@ -242,5 +242,145 @@ describe('writeLastRun / readLastRun — stage heartbeat', () => {
       const written = JSON.parse(mockWriteFileSync.mock.calls[0]?.[1] as string) as LastRun;
       expect(written.currentStage).toBe(stage);
     }
+  });
+});
+
+// ─── getRetryableProducts ─────────────────────────────────────────────────────
+
+function makeQueuedProduct(
+  overrides: Partial<QueuedProduct> & { status: QueuedProduct['status'] },
+): QueuedProduct {
+  return {
+    id: 'p-state-test',
+    productName: 'State Test Product',
+    productUrl: 'https://example.com/p/1',
+    tiktokShopId: 'shop-state-001',
+    category: 'supplements',
+    commissionRate: 10,
+    shopPerformanceScore: 95,
+    score: 75,
+    scoreBreakdown: { salesVelocity: 30, shopPerformance: 20, videoEngagement: 15, assetAvailability: 10 },
+    researchedAt: new Date().toISOString(),
+    soldCount: 100,
+    price: '$19.99',
+    rating: 4.5,
+    reviewCount: 200,
+    sellerName: 'Seller',
+    imageUrl: 'https://example.com/img.jpg',
+    retryCount: 0,
+    failHistory: [],
+    ...overrides,
+  };
+}
+
+function makeRecord(status: FailRecord['status'], error: string, attempt = 1): FailRecord {
+  return { status, error, timestamp: new Date().toISOString(), attempt };
+}
+
+describe('getRetryableProducts — state module integration', () => {
+  const NOW = new Date('2026-04-20T10:00:00.000Z');
+
+  beforeEach(() => {
+    mockExistsSync.mockReturnValue(true);
+    mockMkdirSync.mockReturnValue(undefined);
+    mockWriteFileSync.mockClear();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns empty array when queue is empty', () => {
+    mockReadFileSync.mockReturnValue(JSON.stringify([]));
+    expect(getRetryableProducts(NOW)).toEqual([]);
+  });
+
+  it('returns assets_failed product with no lastRetryAt and < maxAttempts', () => {
+    const p = makeQueuedProduct({
+      status: 'assets_failed',
+      failHistory: [makeRecord('assets_failed', 'Detail fetch failed: 503', 1)],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    const result = getRetryableProducts(NOW);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.id).toBe(p.id);
+  });
+
+  it('returns empty when product status is not a failed status', () => {
+    const p = makeQueuedProduct({ status: 'queued' });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('excludes dead_letter products', () => {
+    const p = makeQueuedProduct({ status: 'dead_letter' });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('applies per-stage cap correctly — assets max is 3', () => {
+    const p = makeQueuedProduct({
+      status: 'assets_failed',
+      failHistory: [
+        makeRecord('assets_failed', 'fail', 1),
+        makeRecord('assets_failed', 'fail', 2),
+        makeRecord('assets_failed', 'fail', 3), // at cap
+      ],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('applies per-stage cap correctly — video max is 2', () => {
+    const p = makeQueuedProduct({
+      status: 'video_failed',
+      failHistory: [
+        makeRecord('video_failed', 'fail', 1),
+        makeRecord('video_failed', 'fail', 2), // at cap
+      ],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('structural failure on assets blocks retry', () => {
+    const p = makeQueuedProduct({
+      status: 'assets_failed',
+      failHistory: [makeRecord('assets_failed', 'Insufficient images: 2/3', 1)],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('structural failure on video blocks retry', () => {
+    const p = makeQueuedProduct({
+      status: 'video_failed',
+      failHistory: [makeRecord('video_failed', 'Input validation failed: bad script', 1)],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('cooldown blocks script_failed retry attempted 2 minutes ago', () => {
+    const lastRetryAt = new Date(NOW.getTime() - 2 * 60 * 1000).toISOString();
+    const p = makeQueuedProduct({
+      status: 'script_failed',
+      lastRetryAt,
+      failHistory: [makeRecord('script_failed', 'Script generation failed: 503', 1)],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    expect(getRetryableProducts(NOW)).toHaveLength(0);
+  });
+
+  it('past cooldown permits script_failed retry attempted 10 minutes ago', () => {
+    const lastRetryAt = new Date(NOW.getTime() - 10 * 60 * 1000).toISOString();
+    const p = makeQueuedProduct({
+      status: 'script_failed',
+      lastRetryAt,
+      failHistory: [makeRecord('script_failed', 'Script generation failed: 503', 1)],
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify([p]));
+    const result = getRetryableProducts(NOW);
+    expect(result).toHaveLength(1);
   });
 });
