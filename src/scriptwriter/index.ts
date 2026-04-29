@@ -2,11 +2,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { getProjectRoot } from '../shared/config.js';
-import { readProductQueue, writeProductQueue, appendError } from '../shared/state.js';
+import { readProductQueue, writeProductQueue, appendError, readAnalystSignals } from '../shared/state.js';
 import { selectFormat } from './format-selector.js';
 import { buildScriptPrompt } from './prompt-builder.js';
 import { parseScriptResponse, ScriptParseError } from './parser.js';
-import type { QueuedProduct, AssetManifest, ProductScript, FailRecord } from '../shared/types.js';
+import type { AnalystSignals, QueuedProduct, AssetManifest, ProductScript, FailRecord } from '../shared/types.js';
 
 const MAX_RETRIES = 1;
 const MIN_IMAGES = 3;
@@ -36,10 +36,11 @@ function saveScript(productId: string, script: ProductScript): void {
 export async function writeScript(
   product: QueuedProduct,
   manifest: AssetManifest,
+  signals?: AnalystSignals | null,
 ): Promise<ProductScript | null> {
   const client = new Anthropic();
   const { format, durationTarget } = selectFormat(product.category);
-  const prompt = buildScriptPrompt(manifest, format, product.category, durationTarget);
+  const prompt = buildScriptPrompt(manifest, format, product.category, durationTarget, signals);
 
   console.log(`[scriptwriter] Generating script for: ${product.productName.slice(0, 60)}`);
   console.log(`[scriptwriter] Format: ${format}, Duration: ${durationTarget}s`);
@@ -95,6 +96,10 @@ export async function writeAllScripts(): Promise<void> {
     console.log('[scriptwriter] No products with assets ready');
     return;
   }
+
+  // Load analyst signals once for the full run — same lazy-load pattern as researcher.
+  // Freshness check happens inside buildScriptPrompt / buildHookPatternInjection.
+  const signals = readAnalystSignals();
 
   console.log(`[scriptwriter] Processing ${pending.length} products`);
 
@@ -155,7 +160,7 @@ export async function writeAllScripts(): Promise<void> {
       continue;
     }
 
-    const script = await writeScript(product, manifest);
+    const script = await writeScript(product, manifest, signals);
 
     const currentQueue = readProductQueue();
     const idx = currentQueue.findIndex((p) => p.id === product.id);

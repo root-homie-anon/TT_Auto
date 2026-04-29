@@ -1,11 +1,51 @@
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { getProjectRoot } from '../shared/config.js';
-import type { AssetManifest, ProductCategory, VideoFormat } from '../shared/types.js';
+import type { AnalystSignals, AssetManifest, ProductCategory, VideoFormat } from '../shared/types.js';
+import { isSignalsFresh } from '../researcher/scorer.js';
+
+/**
+ * Maximum character length for each winning hook pattern exemplar injected into
+ * the scriptwriter prompt. Caps the per-entry contribution so a single
+ * misbehaving signal string cannot meaningfully inflate the prompt. Three
+ * exemplars at this cap + the framing label = ~700 chars total injected.
+ */
+const MAX_EXEMPLAR_CHARS = 200;
+
+/**
+ * Maximum number of winning hook pattern exemplars to inject.
+ * Analyst writes them in priority order; we take the top N.
+ */
+const MAX_EXEMPLARS = 3;
 
 function loadSharedFile(filename: string): string {
   const path = resolve(getProjectRoot(), 'shared', filename);
   return readFileSync(path, 'utf-8');
+}
+
+/**
+ * Build the winning-hook-patterns injection block.
+ *
+ * Returns an empty string (no injection) when:
+ *   - signals is null / undefined
+ *   - signals are stale per isSignalsFresh() (>14d old or contributingVideoCount < 3)
+ *   - winningHookPatterns is empty or missing
+ *
+ * When patterns are present, returns a prompt section with up to MAX_EXEMPLARS
+ * entries, each truncated to MAX_EXEMPLAR_CHARS characters.
+ */
+function buildHookPatternInjection(signals: AnalystSignals | null | undefined): string {
+  if (!isSignalsFresh(signals)) return '';
+
+  // isSignalsFresh guarantees signals is non-null here; cast is safe.
+  const patterns = (signals as AnalystSignals).winningHookPatterns ?? [];
+  if (patterns.length === 0) return '';
+
+  const exemplars = patterns
+    .slice(0, MAX_EXEMPLARS)
+    .map((p) => `- ${p.slice(0, MAX_EXEMPLAR_CHARS)}`);
+
+  return `\n## Recent Winning Hook Patterns (use as inspiration when relevant)\n${exemplars.join('\n')}\n`;
 }
 
 export function buildScriptPrompt(
@@ -13,9 +53,11 @@ export function buildScriptPrompt(
   format: VideoFormat,
   category: ProductCategory,
   durationTarget: number,
+  signals?: AnalystSignals | null,
 ): string {
   const brandGuidelines = loadSharedFile('brand-guidelines.md');
   const hookFormulas = loadSharedFile('hook-formulas.md');
+  const hookPatternInjection = buildHookPatternInjection(signals);
 
   const reviewQuotes = manifest.topReviews
     .slice(0, 3)
@@ -47,8 +89,7 @@ ${getFormatInstructions(format)}
 ${brandGuidelines}
 
 ## Hook Formulas (use one of these patterns)
-${hookFormulas}
-
+${hookFormulas}${hookPatternInjection}
 ## CRITICAL RULES
 - NEVER use medical claims like "cures", "treats", or "prevents"
 - ONLY use "supports", "helps", "promotes", "may improve"
