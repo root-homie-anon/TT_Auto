@@ -105,6 +105,7 @@ export function generateSignals(): AnalystSignals {
     winningFormats: [],
     winningHookPatterns: [],
     minCommissionRateThreshold: 0,
+    contributingVideoCount: withData.length,
     notes: '',
   };
 

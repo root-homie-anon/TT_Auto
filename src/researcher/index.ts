@@ -10,9 +10,9 @@ import {
   readAnalystSignals,
   appendError,
 } from '../shared/state.js';
-import { scoreProduct, meetsMinimumCriteria } from './scorer.js';
+import { scoreProduct, meetsMinimumCriteria, applySignalAdjustments, isSignalsFresh } from './scorer.js';
 import { HEALTH_SEARCH_KEYWORDS, getCategoryForKeyword } from './search-keywords.js';
-import type { QueuedProduct, ProductCategory, ResearchLogEntry } from '../shared/types.js';
+import type { QueuedProduct, ProductCategory, ResearchLogEntry, AnalystSignals } from '../shared/types.js';
 import type { SCSearchProduct } from '../shared/scrape-creators-client.js';
 
 const DEDUP_WINDOW_DAYS = 30;
@@ -56,11 +56,32 @@ function selectKeywordsForRun(): string[] {
   return selected.slice(0, 10);
 }
 
+/**
+ * Log a single warn per run when analyst signals are absent or stale.
+ * Called once at the top of runResearcher() — never inside the per-product loop.
+ */
+function logSignalStatus(signals: AnalystSignals | null | undefined): void {
+  if (isSignalsFresh(signals)) return;
+  appendError({
+    timestamp: new Date().toISOString(),
+    agent: 'researcher',
+    level: 'warn',
+    message: 'analyst-signals stale or missing — falling back to base score',
+    details: signals
+      ? `updatedAt=${signals.updatedAt}, contributingVideoCount=${signals.contributingVideoCount}`
+      : 'no analyst-signals.json found',
+  });
+}
+
 export async function runResearcher(): Promise<QueuedProduct[]> {
   const config = loadConfig();
   const client = new ScrapeCreatorsClient();
   const existingQueue = readProductQueue();
   const posted = readPosted();
+
+  // Load analyst signals once per run. File may not exist → null → fall through to base score.
+  const signals = readAnalystSignals();
+  logSignalStatus(signals);
 
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - DEDUP_WINDOW_DAYS);
@@ -147,15 +168,21 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
         continue;
       }
 
-      const { score, breakdown } = scoreProduct({
+      const { score: baseScore, breakdown } = scoreProduct({
         searchProduct: candidate.searchProduct,
         details,
       });
 
+      // Build a partial QueuedProduct shape for signal adjustment — only category
+      // and commissionRate are read by applySignalAdjustments (§3 spec).
+      const category = getCategoryForKeyword(candidate.keyword) as ProductCategory;
+      const partialProduct = { category, commissionRate: null } as Pick<QueuedProduct, 'category' | 'commissionRate'>;
+      const score = applySignalAdjustments(baseScore, partialProduct as QueuedProduct, signals);
+      const signalAdjusted = score !== baseScore;
+
       // Use the shopPerformance breakdown score (rating-based proxy)
       const shopPerf = breakdown.shopPerformance;
 
-      const category = getCategoryForKeyword(candidate.keyword) as ProductCategory;
       const accepted = meetsMinimumCriteria(shopPerf, score);
 
       const logEntry: ResearchLogEntry = {
@@ -170,6 +197,7 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
             : `Shop quality ${shopPerf} below minimum 80`
           : undefined,
         researchedAt: new Date().toISOString(),
+        ...(signalAdjusted ? { baseScoreBeforeSignals: baseScore } : {}),
       };
 
       researchLog.push(logEntry);
@@ -197,7 +225,10 @@ export async function runResearcher(): Promise<QueuedProduct[]> {
         };
 
         scoredProducts.push({ product, logEntry });
-        console.log(`[researcher] Accepted: ${product.productName.slice(0, 50)} (score: ${score})`);
+        const scoreLabel = signalAdjusted
+          ? `score: ${baseScore} → ${score} (signal-adjusted)`
+          : `score: ${score}`;
+        console.log(`[researcher] Accepted: ${product.productName.slice(0, 50)} (${scoreLabel})`);
       } else {
         console.log(`[researcher] Rejected: ${candidate.searchProduct.title.slice(0, 50)} (${logEntry.rejectReason})`);
       }

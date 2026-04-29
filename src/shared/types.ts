@@ -155,6 +155,13 @@ export interface AnalystSignals {
   winningFormats: string[];
   winningHookPatterns: string[];
   minCommissionRateThreshold: number;
+  /**
+   * Number of posted videos with non-zero views that contributed to this
+   * signal computation. Used by the researcher's freshness predicate — signals
+   * with contributingVideoCount < 3 are treated as stale and ignored.
+   * Written by generateSignals() at signal-generation time.
+   */
+  contributingVideoCount: number;
   notes: string;
 }
 
@@ -194,4 +201,8 @@ export interface ResearchLogEntry {
   accepted: boolean;
   rejectReason?: string;
   researchedAt: string;
+  /** Pre-adjustment score when analyst signals were applied. Present only when
+   *  signals were fresh and the score was adjusted. Allows operators to see the
+   *  delta from signal adjustments vs the raw static-weight score. */
+  baseScoreBeforeSignals?: number;
 }

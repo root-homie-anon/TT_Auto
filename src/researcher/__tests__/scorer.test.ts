@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // Mock config so scorer doesn't try to read config.json from disk
 vi.mock('../../shared/config.js', () => ({
@@ -21,8 +21,9 @@ vi.mock('../../shared/config.js', () => ({
   }),
 }));
 
-import { scoreProduct, meetsMinimumCriteria } from '../scorer.js';
+import { scoreProduct, meetsMinimumCriteria, applySignalAdjustments, isSignalsFresh } from '../scorer.js';
 import type { SCSearchProduct, SCProductDetailResponse } from '../../shared/scrape-creators-client.js';
+import type { AnalystSignals, QueuedProduct, ProductCategory } from '../../shared/types.js';
 
 function makeSearchProduct(overrides: Partial<SCSearchProduct> = {}): SCSearchProduct {
   return {
@@ -231,6 +232,191 @@ describe('scoreProduct', () => {
       );
       expect(score).toBe(expected);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Factories for signal-adjustment tests
+// ---------------------------------------------------------------------------
+
+function makeSignals(overrides: Partial<AnalystSignals> = {}): AnalystSignals {
+  return {
+    updatedAt: new Date().toISOString(),
+    highPerformingCategories: [],
+    avoidCategories: [],
+    winningFormats: [],
+    winningHookPatterns: [],
+    minCommissionRateThreshold: 0,
+    contributingVideoCount: 5,
+    notes: '',
+    ...overrides,
+  };
+}
+
+function makeQueuedProduct(overrides: Partial<QueuedProduct> = {}): QueuedProduct {
+  return {
+    id: 'prod-001',
+    productName: 'Test Product',
+    productUrl: 'https://tiktok.com/shop/pdp/test',
+    tiktokShopId: 'test-001',
+    category: 'general-health' as ProductCategory,
+    commissionRate: null,
+    shopPerformanceScore: 90,
+    score: 72,
+    scoreBreakdown: { salesVelocity: 70, shopPerformance: 80, videoEngagement: 50, assetAvailability: 60 },
+    researchedAt: new Date().toISOString(),
+    status: 'queued',
+    soldCount: 5000,
+    price: '$19.99',
+    rating: 4.5,
+    reviewCount: 150,
+    sellerName: 'TestShop',
+    imageUrl: 'https://example.com/img.jpg',
+    ...overrides,
+  };
+}
+
+describe('applySignalAdjustments', () => {
+  // -----------------------------------------------------------------------
+  // Null / undefined signals — must fall through
+  // -----------------------------------------------------------------------
+  it('returns baseScore unchanged when signals is null', () => {
+    const product = makeQueuedProduct({ category: 'recovery' });
+    expect(applySignalAdjustments(72, product, null)).toBe(72);
+  });
+
+  it('returns baseScore unchanged when signals is undefined', () => {
+    const product = makeQueuedProduct({ category: 'recovery' });
+    expect(applySignalAdjustments(72, product, undefined)).toBe(72);
+  });
+
+  // -----------------------------------------------------------------------
+  // Stale signals — older than 14 days
+  // -----------------------------------------------------------------------
+  it('returns baseScore unchanged when updatedAt is > 14 days ago', () => {
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+    const signals = makeSignals({ updatedAt: fifteenDaysAgo, contributingVideoCount: 10 });
+    const product = makeQueuedProduct({ category: 'recovery' });
+    expect(applySignalAdjustments(72, product, signals)).toBe(72);
+  });
+
+  it('isSignalsFresh returns false for signals > 14 days old', () => {
+    const fifteenDaysAgo = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+    const signals = makeSignals({ updatedAt: fifteenDaysAgo, contributingVideoCount: 10 });
+    expect(isSignalsFresh(signals)).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // Insufficient sample — contributingVideoCount < 3
+  // -----------------------------------------------------------------------
+  it('returns baseScore unchanged when contributingVideoCount < 3 (even if fresh)', () => {
+    const signals = makeSignals({ updatedAt: new Date().toISOString(), contributingVideoCount: 2 });
+    const product = makeQueuedProduct({ category: 'recovery' });
+    expect(applySignalAdjustments(72, product, signals)).toBe(72);
+  });
+
+  it('isSignalsFresh returns false when contributingVideoCount is 0', () => {
+    const signals = makeSignals({ contributingVideoCount: 0 });
+    expect(isSignalsFresh(signals)).toBe(false);
+  });
+
+  // -----------------------------------------------------------------------
+  // Category boost — +10 flat, clamped at 100
+  // -----------------------------------------------------------------------
+  it('adds +10 when product.category is in highPerformingCategories (base 72 → 82)', () => {
+    const signals = makeSignals({ highPerformingCategories: ['recovery'] });
+    const product = makeQueuedProduct({ category: 'recovery' });
+    expect(applySignalAdjustments(72, product, signals)).toBe(82);
+  });
+
+  it('clamps boost at 100 — base 95 + 10 → 100, not 105', () => {
+    const signals = makeSignals({ highPerformingCategories: ['recovery'] });
+    const product = makeQueuedProduct({ category: 'recovery' });
+    expect(applySignalAdjustments(95, product, signals)).toBe(100);
+  });
+
+  it('does not boost when category is not in highPerformingCategories', () => {
+    const signals = makeSignals({ highPerformingCategories: ['recovery'] });
+    const product = makeQueuedProduct({ category: 'supplements' });
+    expect(applySignalAdjustments(72, product, signals)).toBe(72);
+  });
+
+  // -----------------------------------------------------------------------
+  // Category penalty — cap at 50
+  // -----------------------------------------------------------------------
+  it('caps score at 50 when product.category is in avoidCategories (base 88 → 50)', () => {
+    const signals = makeSignals({ avoidCategories: ['supplements'] });
+    const product = makeQueuedProduct({ category: 'supplements' });
+    expect(applySignalAdjustments(88, product, signals)).toBe(50);
+  });
+
+  it('leaves score unchanged when base is already <= 50 and category is in avoidCategories', () => {
+    const signals = makeSignals({ avoidCategories: ['supplements'] });
+    const product = makeQueuedProduct({ category: 'supplements' });
+    expect(applySignalAdjustments(40, product, signals)).toBe(40);
+  });
+
+  // -----------------------------------------------------------------------
+  // Commission floor — gate returning 0
+  // -----------------------------------------------------------------------
+  it('returns 0 when commissionRate is below minCommissionRateThreshold', () => {
+    const signals = makeSignals({ minCommissionRateThreshold: 0.15 });
+    const product = makeQueuedProduct({ commissionRate: 0.08 });
+    expect(applySignalAdjustments(70, product, signals)).toBe(0);
+  });
+
+  it('does NOT filter when commissionRate equals threshold (at-boundary pass)', () => {
+    const signals = makeSignals({ minCommissionRateThreshold: 0.15 });
+    const product = makeQueuedProduct({ commissionRate: 0.15 });
+    // 0.15 is NOT < 0.15 → gate does not fire → base score returned
+    expect(applySignalAdjustments(70, product, signals)).toBe(70);
+  });
+
+  it('does NOT filter when commissionRate is above threshold', () => {
+    const signals = makeSignals({ minCommissionRateThreshold: 0.15 });
+    const product = makeQueuedProduct({ commissionRate: 0.20 });
+    expect(applySignalAdjustments(70, product, signals)).toBe(70);
+  });
+
+  it('skips commission floor when product.commissionRate is null (no false filter on missing data)', () => {
+    // null commissionRate + in highPerformingCategories → should boost, not filter
+    const signals = makeSignals({
+      minCommissionRateThreshold: 0.15,
+      highPerformingCategories: ['recovery'],
+    });
+    const product = makeQueuedProduct({ commissionRate: null, category: 'recovery' });
+    expect(applySignalAdjustments(70, product, signals)).toBe(80);
+  });
+
+  it('skips commission floor when threshold is 0 (analyst default)', () => {
+    const signals = makeSignals({ minCommissionRateThreshold: 0 });
+    const product = makeQueuedProduct({ commissionRate: 0.01 });
+    expect(applySignalAdjustments(70, product, signals)).toBe(70);
+  });
+
+  // -----------------------------------------------------------------------
+  // Disjoint sets — avoid-category takes precedence, boost is not applied
+  // -----------------------------------------------------------------------
+  it('applies penalty cap and skips boost when product is in both lists (defensive)', () => {
+    // By analyst construction these sets are disjoint, but this locks in
+    // the documented rule order: penalty (§4.2) runs before boost (§4.3).
+    const signals = makeSignals({
+      avoidCategories: ['recovery'],
+      highPerformingCategories: ['recovery'],
+    });
+    const product = makeQueuedProduct({ category: 'recovery' });
+    // Penalty caps at 50; boost is skipped (early return after penalty)
+    expect(applySignalAdjustments(88, product, signals)).toBe(50);
+  });
+
+  // -----------------------------------------------------------------------
+  // No mutation of frozen inputs
+  // -----------------------------------------------------------------------
+  it('does not throw when signals and product are frozen (no mutation)', () => {
+    const signals = Object.freeze(makeSignals({ highPerformingCategories: ['recovery'] }));
+    const product = Object.freeze(makeQueuedProduct({ category: 'recovery' }));
+    expect(() => applySignalAdjustments(72, product as QueuedProduct, signals as AnalystSignals)).not.toThrow();
+    expect(applySignalAdjustments(72, product as QueuedProduct, signals as AnalystSignals)).toBe(82);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { ScoreBreakdown } from '../shared/types.js';
+import type { ScoreBreakdown, AnalystSignals, QueuedProduct } from '../shared/types.js';
 import type { SCSearchProduct, SCProductDetailResponse } from '../shared/scrape-creators-client.js';
 import { getSoldCount, parseCount } from '../shared/scrape-creators-client.js';
 import { loadConfig } from '../shared/config.js';
@@ -146,4 +146,82 @@ export function meetsMinimumCriteria(
   const minShopPerf = config.channel.pilotProgramActive ? 80 : 0;
 
   return score >= minScore && shopPerformanceScore >= minShopPerf;
+}
+
+const STALENESS_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
+
+/**
+ * Returns true if signals are present and fresh enough to trust.
+ *
+ * Signals are fresh when ALL of:
+ *   1. signals is non-null/undefined
+ *   2. updatedAt is < 14 days ago
+ *   3. contributingVideoCount >= 3
+ *
+ * Exported so the caller in researcher/index.ts can use the same predicate
+ * for its one-per-run log decision without duplicating the logic.
+ */
+export function isSignalsFresh(signals: AnalystSignals | null | undefined): boolean {
+  if (signals == null) return false;
+  const age = Date.now() - new Date(signals.updatedAt).getTime();
+  if (age >= STALENESS_MS) return false;
+  if ((signals.contributingVideoCount ?? 0) < 3) return false;
+  return true;
+}
+
+/**
+ * Apply analyst-derived bounded adjustments to a base product score.
+ *
+ * Pure function — reads only its arguments, writes nothing. Staleness logging
+ * is the caller's responsibility (see researcher/index.ts).
+ *
+ * Rules applied in order (§4 of signal-weights.md):
+ *   1. Commission floor — gate: returns 0 if commission is below threshold
+ *   2. Category penalty — cap at 50 if product.category is in avoidCategories
+ *   3. Category boost  — +10 if product.category is in highPerformingCategories
+ *   4. Final clamp to [0, 100]
+ *
+ * Stale or missing signals → returns baseScore unchanged, no throw.
+ */
+export function applySignalAdjustments(
+  baseScore: number,
+  product: QueuedProduct,
+  signals: AnalystSignals | null | undefined,
+): number {
+  // Stale or missing — fall through to base score unchanged
+  if (!isSignalsFresh(signals)) return baseScore;
+
+  // Safe to access: signals is non-null, fresh, and has >=3 contributing videos.
+  // Defensive defaults on individual fields in case of an older file format.
+  const avoidCategories = signals!.avoidCategories ?? [];
+  const highPerformingCategories = signals!.highPerformingCategories ?? [];
+  const threshold = signals!.minCommissionRateThreshold ?? 0;
+
+  let score = baseScore;
+
+  // Rule 4.1 — Commission floor (gate)
+  if (
+    threshold > 0 &&
+    product.commissionRate != null &&
+    product.commissionRate < threshold
+  ) {
+    return 0;
+  }
+  // null commissionRate → skip rule per spec §4.1 ("do not filter on missing data")
+  // threshold === 0 → skip rule per spec §4.1 ("analyst's default; no floor")
+
+  // Rule 4.2 — Category penalty (cap at 50)
+  if (avoidCategories.includes(product.category)) {
+    score = Math.min(score, 50);
+    // Per §4.5: sets disjoint by analyst construction — skip boost rule.
+    return Math.max(0, Math.min(100, score));
+  }
+
+  // Rule 4.3 — Category boost (+10, additive, never compounded)
+  if (highPerformingCategories.includes(product.category)) {
+    score = score + 10;
+  }
+
+  // Rule 4.5 — Final clamp
+  return Math.max(0, Math.min(100, score));
 }
